@@ -29,6 +29,9 @@ xcap = "0.7"
 # Image processing
 image = "0.25"
 imageproc = "0.25"
+# OCR
+tesseract = "0.14"
+regex = "1.10"
 
 [dev-dependencies]
 tokio-test = "0.4"

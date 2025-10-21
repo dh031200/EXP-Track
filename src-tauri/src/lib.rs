@@ -7,6 +7,9 @@ use commands::config::{
     clear_roi, get_all_rois, get_config_path, init_config_manager, load_config, load_roi,
     open_roi_preview, save_config, save_roi, save_roi_preview, ConfigManagerState,
 };
+use commands::ocr::{
+    init_ocr_service, recognize_exp, recognize_level, recognize_map, OcrServiceState,
+};
 use commands::screen_capture::{
     capture_full_screen, capture_region, get_screen_dimensions, init_screen_capture,
     ScreenCaptureState,
@@ -23,10 +26,14 @@ pub fn run() {
     // Initialize config manager
     let config_manager = init_config_manager().expect("Failed to initialize config manager");
 
+    // Initialize OCR service
+    let ocr_service = init_ocr_service().expect("Failed to initialize OCR service");
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(ScreenCaptureState::default())
         .manage(config_manager)
+        .manage(ocr_service)
         .invoke_handler(tauri::generate_handler![
             greet,
             init_screen_capture,
@@ -41,7 +48,10 @@ pub fn run() {
             load_config,
             get_config_path,
             save_roi_preview,
-            open_roi_preview
+            open_roi_preview,
+            recognize_level,
+            recognize_exp,
+            recognize_map
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
