@@ -1,0 +1,112 @@
+/* Full-screen semi-transparent overlay */
+.roi-selector-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.3); /* Semi-transparent to indicate selection mode */
+  user-select: none;
+}
+
+.roi-selector-header {
+  position: absolute;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.8);
+  padding: 10px 20px;
+  border-radius: 8px;
+  color: #fff;
+  z-index: 10000;
+}
+
+.roi-selector-header p {
+  margin: 0;
+  font-size: 14px;
+}
+
+.roi-selector-header button {
+  padding: 6px 16px;
+  background: #f44336;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.roi-selector-header button:hover {
+  background: #d32f2f;
+}
+
+.roi-selector-loading,
+.roi-selector-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  color: white;
+  text-align: center;
+}
+
+.roi-selector-error {
+  background: rgba(244, 67, 54, 0.1);
+  border: 2px solid #f44336;
+  padding: 40px;
+  border-radius: 8px;
+}
+
+.roi-selector-error button {
+  padding: 10px 24px;
+  background: #f44336;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.roi-selector-error button:hover {
+  background: #d32f2f;
+}
+
+/* Dark mask that covers everything except selection */
+.roi-overlay-mask {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+
+/* Selection box */
+.roi-selection-box {
+  position: absolute;
+  border: 2px solid #00ff00;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+/* Dimension label */
+.roi-dimension-label {
+  position: absolute;
+  top: -30px;
+  left: 0;
+  background: rgba(0, 255, 0, 0.9);
+  color: #000;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: bold;
+  font-family: monospace;
+  white-space: nowrap;
+}

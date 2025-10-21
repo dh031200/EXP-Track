@@ -1,0 +1,117 @@
+.compact-roi-manager {
+  padding: 4px 8px;
+  width: 100%;
+}
+
+.roi-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.roi-button-group {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.roi-select-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  background: white;
+  border: 2px solid;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-size: 13px;
+  font-weight: 500;
+  position: relative;
+}
+
+.roi-select-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.roi-select-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.roi-icon {
+  font-size: 16px;
+}
+
+.roi-label {
+  flex: 1;
+  text-align: left;
+  color: #333;
+}
+
+.roi-check {
+  font-size: 14px;
+  color: #4CAF50;
+}
+
+.roi-actions-compact {
+  display: flex;
+  gap: 4px;
+}
+
+.roi-action-btn {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-size: 14px;
+  padding: 0;
+}
+
+.roi-action-btn:hover {
+  background: #f5f5f5;
+  transform: scale(1.05);
+}
+
+.roi-action-btn.view:hover {
+  border-color: #2196F3;
+  background: #E3F2FD;
+}
+
+.roi-action-btn.delete:hover {
+  border-color: #f44336;
+  background: #FFEBEE;
+}
+
+.roi-init-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px;
+  font-size: 12px;
+  color: #666;
+}
+
+.spinner-small {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #f3f3f3;
+  border-top: 2px solid #2196F3;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+

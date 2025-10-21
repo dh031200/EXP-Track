@@ -1,0 +1,187 @@
+.timer-settings-modal {
+  min-width: 420px;
+  max-width: 500px;
+}
+
+.timer-settings-modal .modal-header h2 {
+  font-size: 15px;
+}
+
+.timer-settings-modal .modal-content {
+  padding: 2px 16px 10px 16px;
+}
+
+.settings-section {
+  margin-bottom: 6px;
+}
+
+.settings-section:last-of-type {
+  margin-bottom: 4px;
+}
+
+.settings-section-title {
+  margin: 0 0 3px 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+}
+
+.settings-section-desc {
+  margin: 0 0 5px 0;
+  font-size: 11px;
+  color: #666;
+  line-height: 1.4;
+}
+
+.settings-options {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-options-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.settings-options-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.interval-options {
+  display: flex;
+  flex-direction: row;
+  gap: 4px;
+  justify-content: space-between;
+}
+
+.interval-option {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 4px;
+  background: rgba(0, 0, 0, 0.02);
+  border: 2px solid rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: center;
+  min-width: 0;
+}
+
+.interval-option:hover {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.15);
+}
+
+.interval-option.selected {
+  background: rgba(102, 126, 234, 0.08);
+  border-color: #667eea;
+}
+
+.interval-option input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.interval-option span {
+  font-size: 12px;
+  color: #333;
+  font-weight: 500;
+  user-select: none;
+}
+
+.settings-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.02);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.settings-option:hover {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.12);
+}
+
+.settings-option input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.settings-option span {
+  font-size: 12px;
+  color: #333;
+  font-weight: 500;
+  user-select: none;
+}
+
+.settings-footer {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.settings-reset-btn {
+  padding: 8px 16px;
+  font-size: 12px;
+  background: rgba(0, 0, 0, 0.05);
+  color: #666;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-weight: 500;
+}
+
+.settings-reset-btn:hover {
+  background: rgba(0, 0, 0, 0.08);
+  color: #333;
+}
+
+.pagination-dots {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0 0 0;
+  margin-top: 12px;
+}
+
+.pagination-dots span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #999;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.pagination-dots span:hover:not(.active) {
+  background: #666;
+  transform: scale(1.2);
+}
+
+.pagination-dots span.active {
+  background: #667eea;
+  cursor: default;
+  width: 10px;
+  height: 10px;
+  border-color: #667eea;
+}
+

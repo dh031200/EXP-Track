@@ -1,0 +1,70 @@
+/* Custom title bar styles */
+.titlebar {
+  height: 40px;
+  background: rgba(60, 60, 60, 1);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  user-select: none;
+  cursor: grab;
+  border-radius: 12px 12px 0 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.2);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.titlebar:active {
+  cursor: grabbing;
+}
+
+.titlebar-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #f0f0f0;
+  letter-spacing: -0.2px;
+}
+
+.titlebar-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.titlebar-button {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: none;
+  background: rgba(255, 255, 255, 0.12);
+  color: #e0e0e0;
+  font-size: 20px;
+  font-weight: 300;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+}
+
+.titlebar-button:hover {
+  background: rgba(255, 255, 255, 0.2);
+  transform: scale(1.05);
+}
+
+.titlebar-button.minimize {
+  font-size: 24px;
+  padding-bottom: 4px;
+}
+
+.titlebar-button.close:hover {
+  background: #ff5f57;
+  color: white;
+}
+
+.titlebar-button:active {
+  transform: scale(0.95);
+}
+
