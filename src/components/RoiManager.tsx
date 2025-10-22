@@ -44,11 +44,23 @@ const ROI_TYPES: RoiCardData[] = [
     description: '경험치 퍼센트 영역',
   },
   {
-    type: 'meso',
-    label: 'Meso',
-    color: '#FF9800',
-    description: '메소 영역',
+    type: 'hp',
+    label: 'HP',
+    color: '#F44336',
+    description: '체력 영역',
   },
+  {
+    type: 'mp',
+    label: 'MP',
+    color: '#9C27B0',
+    description: '마나 영역',
+  },
+  // {
+  //   type: 'meso',
+  //   label: 'Meso',
+  //   color: '#FF9800',
+  //   description: '메소 영역',
+  // },
 ];
 
 export function RoiManager({ onSelectingChange }: RoiManagerProps) {
@@ -58,11 +70,12 @@ export function RoiManager({ onSelectingChange }: RoiManagerProps) {
   const [previews, setPreviews] = useState<Record<RoiType, string | null>>({
     level: null,
     exp: null,
-    meso: null,
+    hp: null,
+    mp: null,
   });
   const windowStateRef = useRef<WindowState | null>(null);
 
-  const { levelRoi, expRoi, mesoRoi, setRoi, removeRoi, loadAllRois } = useRoiStore();
+  const { levelRoi, expRoi, hpRoi, mpRoi, setRoi, removeRoi, loadAllRois } = useRoiStore();
 
   // Initialize screen capture and load saved ROIs
   useEffect(() => {
@@ -77,7 +90,7 @@ export function RoiManager({ onSelectingChange }: RoiManagerProps) {
   // Generate previews for configured ROIs
   useEffect(() => {
     const generatePreviews = async () => {
-      const rois = { level: levelRoi, exp: expRoi, meso: mesoRoi };
+      const rois = { level: levelRoi, exp: expRoi, hp: hpRoi, mp: mpRoi };
 
       for (const [type, roi] of Object.entries(rois)) {
         if (roi && !previews[type as RoiType]) {
@@ -95,7 +108,7 @@ export function RoiManager({ onSelectingChange }: RoiManagerProps) {
     if (isInitialized) {
       generatePreviews();
     }
-  }, [levelRoi, expRoi, mesoRoi, isInitialized]);
+  }, [levelRoi, expRoi, hpRoi, mpRoi, isInitialized]);
 
   const handleSelectClick = async (type: RoiType) => {
     setCurrentRoiType(type);
@@ -157,8 +170,10 @@ export function RoiManager({ onSelectingChange }: RoiManagerProps) {
         return levelRoi;
       case 'exp':
         return expRoi;
-      case 'meso':
-        return mesoRoi;
+      case 'hp':
+        return hpRoi;
+      case 'mp':
+        return mpRoi;
     }
   };
 

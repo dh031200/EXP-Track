@@ -56,18 +56,26 @@ impl ExpCalculator {
         println!("🦀 [Calculator] initial_data: level={}, exp={}, percentage={}", initial.level, initial.exp, initial.percentage);
         println!("🦀 [Calculator] last_data: level={}, exp={}, percentage={}", last.level, last.exp, last.percentage);
 
-        // Detect OCR errors: if new exp is significantly smaller than initial, reset baseline
-        // This handles cases where the first OCR read was wrong (e.g., 4618571 instead of 461857)
-        if data.level == initial.level && data.exp < initial.exp {
-            let ratio = initial.exp as f64 / data.exp.max(1) as f64;
-            println!("🦀 [Calculator] 🔍 OCR Check: ratio={:.2}x (threshold=10.0x)", ratio);
-            // Use 10x threshold to avoid false positives (OCR digit errors typically add/remove a digit)
-            if ratio >= 10.0 {
-                println!("🦀 [Calculator] ⚠️ OCR ERROR DETECTED: initial_exp={} is {:.1}x larger than current_exp={}", initial.exp, ratio, data.exp);
-                println!("🦀 [Calculator] 🔄 Resetting baseline to current value (likely first read was corrupted)");
-                self.initial_data = Some(data.clone());
-                // Reset last_data too to avoid confusing the next update
-                self.last_data = Some(data.clone());
+        // Detect OCR errors: if exp change is unrealistic (>10x or <0.1x from last reading)
+        // This handles cases where OCR misreads digits (e.g., bracket '[' becomes '1')
+        if data.level == initial.level {
+            // Check against LAST reading (not initial) for better accuracy
+            if let Some(ref last) = self.last_data {
+                if last.level == data.level && last.exp > 0 {
+                    let ratio = data.exp as f64 / last.exp as f64;
+
+                    // Detect both explosions (ratio > 10) and drops (ratio < 0.1)
+                    if ratio > 10.0 || ratio < 0.1 {
+                        println!("🦀 [Calculator] 🔍 OCR Check: ratio={:.2}x (expected: 0.1x - 10.0x)", ratio);
+                        println!("🦀 [Calculator] ⚠️ OCR ERROR DETECTED: last_exp={}, current_exp={} (ratio={:.2}x)",
+                                last.exp, data.exp, ratio);
+                        println!("🦀 [Calculator] 🚫 Rejecting this reading - keeping previous value");
+
+                        // Don't update last_data - keep the good value
+                        // Return stats based on last good data
+                        return self.update(last.clone());
+                    }
+                }
             }
         }
 

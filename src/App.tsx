@@ -443,26 +443,24 @@ function App() {
             </div>
 
 
-            {/* EXP Tracker Display - Only show when tracking or has data */}
-            {(expTracker.state.isTracking || expTracker.state.stats) && (
-              <div style={{
-                width: '100%',
-                maxWidth: '400px',
-                marginTop: '10px' /* Reduced from 16px */
-              }}>
-                <ExpTrackerDisplay
-                  stats={expTracker.state.stats}
-                  level={expTracker.state.level}
-                  exp={expTracker.state.exp}
-                  percentage={expTracker.state.percentage}
-                  mapName={expTracker.state.mapName}
-                  isTracking={expTracker.state.isTracking}
-                  error={expTracker.state.error}
-                  ocrStatus={expTracker.state.ocrStatus}
-                  averageData={calculateAverage()}
-                />
-              </div>
-            )}
+            {/* EXP Tracker Display - Always visible for better UX */}
+            <div style={{
+              width: '100%',
+              maxWidth: '400px',
+              marginTop: '10px' /* Reduced from 16px */
+            }}>
+              <ExpTrackerDisplay
+                stats={expTracker.state.stats}
+                level={expTracker.state.level}
+                exp={expTracker.state.exp}
+                percentage={expTracker.state.percentage}
+                mapName={expTracker.state.mapName}
+                isTracking={expTracker.state.isTracking}
+                error={expTracker.state.error}
+                ocrStatus={expTracker.state.ocrStatus}
+                averageData={calculateAverage()}
+              />
+            </div>
 
             {/* Average EXP Display removed - now integrated into ExpTrackerDisplay */}
 

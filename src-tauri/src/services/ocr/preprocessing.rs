@@ -1,4 +1,4 @@
-use image::{DynamicImage, GenericImageView, ImageBuffer, Luma, Rgb, Rgba};
+use image::{DynamicImage, GenericImageView, ImageBuffer, Luma};
 use crate::models::config::PreprocessingConfig;
 
 /// Image preprocessing service for OCR optimization
@@ -75,7 +75,9 @@ impl PreprocessingService {
     }
 
     /// Extract white pixels from HSV color space (for level/exp UI)
-    /// Based on legacy Python implementation
+    /// Matches legacy Python implementation exactly:
+    /// lower_white = np.array([0, 0, 180])
+    /// upper_white = np.array([179, 50, 255])
     pub fn extract_white_hsv(&self, image: &DynamicImage) -> DynamicImage {
         let rgb_img = image.to_rgb8();
         let (width, height) = rgb_img.dimensions();
@@ -83,11 +85,11 @@ impl PreprocessingService {
         // Create mask for white pixels
         let mask = ImageBuffer::from_fn(width, height, |x, y| {
             let pixel = rgb_img.get_pixel(x, y);
-            let (h, s, v) = Self::rgb_to_hsv(pixel[0], pixel[1], pixel[2]);
+            // Convert RGB to BGR order for OpenCV-compatible HSV (R=pixel[0], G=pixel[1], B=pixel[2])
+            let (h, s, v) = Self::rgb_to_hsv(pixel[2], pixel[1], pixel[0]);
 
-            // White range in HSV: S=[0,50], V=[180,255]
-            // Relaxed for colored UI elements: S <= 100, V >= 150
-            let is_white = s <= 100 && v >= 150;
+            // White range in HSV (legacy exact values): S=[0,50], V=[180,255]
+            let is_white = s <= 50 && v >= 180;
 
             if is_white {
                 Luma([255u8])
@@ -99,22 +101,52 @@ impl PreprocessingService {
         DynamicImage::ImageLuma8(mask)
     }
 
-    /// Preprocess for level ROI (white extraction + morphological operations)
+    /// Preprocess for level ROI (white + orange extraction)
+    /// Orange numbers (88) + white text (LV.)
     pub fn preprocess_level(&self, image: &DynamicImage) -> Result<DynamicImage, String> {
-        // Extract white pixels (numbers on colored background)
-        let white_mask = self.extract_white_hsv(image);
+        let rgb_img = image.to_rgb8();
+        let (width, height) = rgb_img.dimensions();
 
-        // Skip morphology for now - test HSV extraction directly
-        // let opened = self.morphology_open(&white_mask, 1);
-        // let closed = self.morphology_close(&opened, 1);
+        // Create mask for white + orange pixels
+        let mask = ImageBuffer::from_fn(width, height, |x, y| {
+            let pixel = rgb_img.get_pixel(x, y);
+            // Convert RGB to BGR order for OpenCV-compatible HSV (R=pixel[0], G=pixel[1], B=pixel[2])
+            let (h, s, v) = Self::rgb_to_hsv(pixel[2], pixel[1], pixel[0]);
 
-        // Resize 3x for better OCR
-        let resized = self.scale(&white_mask, 3.0);
+            // White: S=[0,50], V=[180,255]
+            let is_white = s <= 50 && v >= 180;
 
-        Ok(resized)
+            // Orange (level numbers): H=[10,25], S=[100,255], V=[150,255]
+            // Orange is red-yellow with high saturation
+            let is_orange = h >= 10 && h <= 25 && s >= 100 && v >= 150;
+
+            if is_white || is_orange {
+                Luma([255u8])
+            } else {
+                Luma([0u8])
+            }
+        });
+
+        let mask_img = DynamicImage::ImageLuma8(mask);
+
+        // Resize 2x for better OCR (legacy uses fx=2, fy=2, INTER_CUBIC)
+        let resized = self.scale(&mask_img, 2.0);
+
+        // GaussianBlur (3x3, sigma=0) - legacy final step
+        let blurred = self.gaussian_blur(&resized, 3);
+
+        // Debug: Save processed image
+        if let Err(e) = blurred.save("/tmp/level.png") {
+            eprintln!("❌ Failed to save level.png: {}", e);
+        } else {
+            println!("✅ Saved level.png (preprocessed)");
+        }
+
+        Ok(blurred)
     }
 
     /// Preprocess for EXP ROI (white + green extraction)
+    /// Matches legacy Python preprocessing exactly
     pub fn preprocess_exp(&self, image: &DynamicImage) -> Result<DynamicImage, String> {
         let rgb_img = image.to_rgb8();
         let (width, height) = rgb_img.dimensions();
@@ -122,10 +154,11 @@ impl PreprocessingService {
         // Create mask for white + green pixels
         let mask = ImageBuffer::from_fn(width, height, |x, y| {
             let pixel = rgb_img.get_pixel(x, y);
-            let (h, s, v) = Self::rgb_to_hsv(pixel[0], pixel[1], pixel[2]);
+            // Convert RGB to BGR order for OpenCV-compatible HSV (R=pixel[0], G=pixel[1], B=pixel[2])
+            let (h, s, v) = Self::rgb_to_hsv(pixel[2], pixel[1], pixel[0]);
 
-            // White: relaxed threshold for UI elements
-            let is_white = s <= 100 && v >= 150;
+            // White: exact legacy threshold S=[0,50], V=[180,255]
+            let is_white = s <= 50 && v >= 180;
 
             // Green (brackets): H=[35,85], S=[40,255], V=[80,255]
             let is_green = h >= 35 && h <= 85 && s >= 40 && v >= 80;
@@ -139,13 +172,108 @@ impl PreprocessingService {
 
         let mask_img = DynamicImage::ImageLuma8(mask);
 
-        // Skip morphology for now - test extraction directly
-        // let closed = self.morphology_close(&mask_img, 1);
+        // Resize 2x for better OCR (legacy uses fx=2, fy=2, INTER_CUBIC)
+        let resized = self.scale(&mask_img, 2.0);
 
-        // Resize 3x for better OCR
-        let resized = self.scale(&mask_img, 3.0);
+        // GaussianBlur (3x3, sigma=0) - legacy final step
+        let blurred = self.gaussian_blur(&resized, 3);
 
-        Ok(resized)
+        // Debug: Save processed image
+        if let Err(e) = blurred.save("/tmp/exp.png") {
+            eprintln!("❌ Failed to save exp.png: {}", e);
+        } else {
+            println!("✅ Saved exp.png (preprocessed)");
+        }
+
+        Ok(blurred)
+    }
+
+    /// Apply Gaussian blur (matches legacy cv2.GaussianBlur)
+    pub fn gaussian_blur(&self, image: &DynamicImage, kernel_size: u32) -> DynamicImage {
+        use imageproc::filter::gaussian_blur_f32;
+
+        let gray_img = image.to_luma8();
+
+        // Legacy uses (3,3) kernel with sigma=0 (auto-calculated from kernel size)
+        // imageproc uses sigma directly, so we calculate it
+        // OpenCV sigma calculation: sigma = 0.3*((ksize-1)*0.5 - 1) + 0.8
+        let sigma = 0.3 * ((kernel_size as f32 - 1.0) * 0.5 - 1.0) + 0.8;
+
+        let blurred = gaussian_blur_f32(&gray_img, sigma);
+
+        DynamicImage::ImageLuma8(blurred)
+    }
+
+    /// Preprocess for HP/MP ROI (white text with black outline extraction)
+    /// Extracts bright pixels while excluding pure white background
+    ///
+    /// Image type detection:
+    /// - If image is roughly square or close to 112x112 (HiDPI): full HP/MP box
+    ///   → Crop to bottom half (where numbers are)
+    /// - Otherwise: user selected numbers only
+    ///   → Use full image
+    pub fn preprocess_hp_mp(&self, image: &DynamicImage) -> Result<DynamicImage, String> {
+        let (width, height) = image.dimensions();
+
+        // Detect if this is a full HP/MP box or numbers-only selection
+        // Full box: roughly square (aspect ratio close to 1.0) or close to 112x112
+        let aspect_ratio = width as f32 / height as f32;
+        let is_square = aspect_ratio >= 0.8 && aspect_ratio <= 1.25;
+        let is_near_112 = (width as i32 - 112).abs() < 20 && (height as i32 - 112).abs() < 20;
+        let is_full_box = is_square || is_near_112;
+
+        // If full box, crop to bottom-right (numbers area, excluding icon on left)
+        let cropped_image = if is_full_box {
+            // Crop to bottom half
+            let crop_y = height / 2;
+            let crop_height = height - crop_y;
+
+            // Also crop from left to remove icon (icon is roughly 30-40% of width)
+            let crop_x = width * 35 / 100;  // Start at 35% from left
+            let crop_width = width - crop_x;
+
+            image.crop_imm(crop_x, crop_y, crop_width, crop_height)
+        } else {
+            image.clone()
+        };
+
+        let rgb_img = cropped_image.to_rgb8();
+        let (crop_width, crop_height) = rgb_img.dimensions();
+
+        // Apply binary threshold - keep bright pixels, exclude pure white background
+        let mask = ImageBuffer::from_fn(crop_width, crop_height, |x, y| {
+            let pixel = rgb_img.get_pixel(x, y);
+            let r = pixel[0];
+            let g = pixel[1];
+            let b = pixel[2];
+
+            // Calculate min and max channels
+            let min_val = r.min(g).min(b);
+
+            // Keep pixels that are bright (200+) but NOT pure white
+            // Pure white has all channels very similar and very high (250+)
+            let is_very_bright = min_val >= 250;
+            let is_bright = min_val >= 200;
+
+            if is_bright && !is_very_bright {
+                Luma([255u8])
+            } else {
+                Luma([0u8])
+            }
+        });
+
+        let mask_img = DynamicImage::ImageLuma8(mask);
+
+        // Apply dilation to expand white pixels (make text thicker and more connected)
+        let dilated = self.dilate(&mask_img, 1);
+
+        // Resize 5x for better OCR (these images are very small, need more scaling)
+        let resized = self.scale(&dilated, 5.0);
+
+        // Light blur to smooth edges
+        let blurred = self.gaussian_blur(&resized, 3);
+
+        Ok(blurred)
     }
 
     /// Convert RGB to HSV
@@ -184,6 +312,35 @@ impl PreprocessingService {
         let v = (max * 255.0) as u8;
 
         (h, s, v)
+    }
+
+    /// Apply dilation to image (expands white areas, shrinks black areas)
+    /// Makes white text thicker and more connected
+    fn dilate(&self, image: &DynamicImage, iterations: u32) -> DynamicImage {
+        use imageproc::morphology::dilate;
+        use imageproc::distance_transform::Norm;
+
+        let mut result = image.to_luma8();
+
+        for _ in 0..iterations {
+            result = dilate(&result, Norm::L1, 1);
+        }
+
+        DynamicImage::ImageLuma8(result)
+    }
+
+    /// Apply erosion to image (thickens black areas, shrinks white areas)
+    fn erode(&self, image: &DynamicImage, iterations: u32) -> DynamicImage {
+        use imageproc::morphology::erode;
+        use imageproc::distance_transform::Norm;
+
+        let mut result = image.to_luma8();
+
+        for _ in 0..iterations {
+            result = erode(&result, Norm::L1, 1);
+        }
+
+        DynamicImage::ImageLuma8(result)
     }
 
     /// Morphological opening (erosion followed by dilation)

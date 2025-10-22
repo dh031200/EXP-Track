@@ -65,8 +65,10 @@ impl Default for WindowConfig {
 pub struct RoiConfig {
     pub level: Option<Roi>,
     pub exp: Option<Roi>,
-    pub meso: Option<Roi>,
-    pub map_location: Option<Roi>,
+    pub hp: Option<Roi>,
+    pub mp: Option<Roi>,
+    // pub meso: Option<Roi>, // Commented out temporarily
+    // pub map_location: Option<Roi>, // Commented out temporarily
 }
 
 /// Tracking configuration
@@ -229,8 +231,8 @@ mod tests {
         // ROI config
         assert!(config.roi.level.is_none());
         assert!(config.roi.exp.is_none());
-        assert!(config.roi.meso.is_none());
-        assert!(config.roi.map_location.is_none());
+        assert!(config.roi.hp.is_none());
+        assert!(config.roi.mp.is_none());
 
         // Tracking config
         assert_eq!(config.tracking.update_interval, 1);
@@ -271,8 +273,8 @@ mod tests {
         assert_eq!(config, deserialized);
         assert!(deserialized.roi.level.is_some());
         assert!(deserialized.roi.exp.is_some());
-        assert!(deserialized.roi.meso.is_none());
-        assert!(deserialized.roi.map_location.is_none());
+        assert!(deserialized.roi.hp.is_none());
+        assert!(deserialized.roi.mp.is_none());
     }
 
     #[test]

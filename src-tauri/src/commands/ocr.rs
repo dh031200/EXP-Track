@@ -1,13 +1,14 @@
 use crate::models::ocr_result::{ExpResult, LevelResult, MapResult};
 use crate::services::ocr::{OcrEngine, PreprocessingService, TesseractEngine};
-use crate::services::ocr::{parse_exp, parse_level, parse_map};
+use crate::services::ocr::{parse_exp, parse_map};
 use base64::Engine as _;
 use image::DynamicImage;
-use std::sync::Mutex;
+use parking_lot::Mutex;
+use std::sync::Arc;
 use tauri::State;
 
-/// State wrapper for OCR service
-pub type OcrServiceState = Mutex<OcrService>;
+/// State wrapper for OCR service (Arc for async sharing, parking_lot::Mutex for performance)
+pub type OcrServiceState = Arc<Mutex<OcrService>>;
 
 /// OCR service that combines preprocessing, OCR engine, and parsing
 pub struct OcrService {
@@ -29,13 +30,23 @@ impl OcrService {
 
     /// Recognize and parse level from image
     pub fn recognize_level(&self, image: &DynamicImage) -> Result<LevelResult, String> {
-        // Use HSV-based white extraction (matches legacy preprocessing)
+        // Debug: Save original image
+        if let Err(e) = image.save("/tmp/level_original.png") {
+            eprintln!("❌ Failed to save original image: {}", e);
+        } else {
+            println!("✅ Saved level_original.png");
+        }
+
+        // Use HSV-based white+orange extraction
         let processed = self.preprocessor.preprocess_level(image)?;
 
         // Whitelist: digits only (legacy used classify_bln_numeric_mode)
+        // Use PSM 8 (single word) for level numbers (matches legacy --psm 8)
         let raw_text = self
             .engine
-            .recognize_with_config(&processed, "eng", Some("0123456789"))?;
+            .recognize_level_with_config(&processed, "eng", Some("0123456789"))?;
+
+        println!("🔍 Level OCR raw text: '{}'", raw_text.trim());
 
         // Parse level (strip all non-digits)
         let digits_only = raw_text.chars().filter(|c| c.is_ascii_digit()).collect::<String>();
@@ -61,6 +72,13 @@ impl OcrService {
 
     /// Recognize and parse EXP from image
     pub fn recognize_exp(&self, image: &DynamicImage) -> Result<ExpResult, String> {
+        // Debug: Save original image
+        if let Err(e) = image.save("/tmp/exp_original.png") {
+            eprintln!("❌ Failed to save original EXP image: {}", e);
+        } else {
+            println!("✅ Saved exp_original.png");
+        }
+
         // Use HSV-based white+green extraction (matches legacy preprocessing)
         let processed = self.preprocessor.preprocess_exp(image)?;
 
@@ -68,6 +86,8 @@ impl OcrService {
         let raw_text = self
             .engine
             .recognize_with_config(&processed, "eng", Some("0123456789.%[] "))?;
+
+        println!("🔍 EXP OCR raw text: '{}'", raw_text.trim());
 
         // Parse EXP
         let exp_data = parse_exp(&raw_text)?;
@@ -114,12 +134,58 @@ impl OcrService {
             raw_text,
         })
     }
+
+    /// Recognize HP value from image (numbers only)
+    pub fn recognize_hp(&self, image: &DynamicImage) -> Result<u32, String> {
+        // Use HP/MP preprocessing (extracts bright pixels, excludes pure white)
+        let processed = self.preprocessor.preprocess_hp_mp(image)?;
+
+        // Whitelist: digits only
+        let raw_text = self
+            .engine
+            .recognize_level_with_config(&processed, "eng", Some("0123456789"))?;
+
+        println!("🔍 HP OCR raw text: '{}'", raw_text.trim());
+
+        // Extract digits
+        let digits: String = raw_text.chars().filter(|c| c.is_ascii_digit()).collect();
+
+        if digits.is_empty() {
+            return Err("No digits found in HP image".to_string());
+        }
+
+        digits.parse::<u32>()
+            .map_err(|e| format!("Failed to parse HP value: {}", e))
+    }
+
+    /// Recognize MP value from image (numbers only)
+    pub fn recognize_mp(&self, image: &DynamicImage) -> Result<u32, String> {
+        // Use HP/MP preprocessing (extracts bright pixels, excludes pure white)
+        let processed = self.preprocessor.preprocess_hp_mp(image)?;
+
+        // Whitelist: digits only
+        let raw_text = self
+            .engine
+            .recognize_level_with_config(&processed, "eng", Some("0123456789"))?;
+
+        println!("🔍 MP OCR raw text: '{}'", raw_text.trim());
+
+        // Extract digits
+        let digits: String = raw_text.chars().filter(|c| c.is_ascii_digit()).collect();
+
+        if digits.is_empty() {
+            return Err("No digits found in MP image".to_string());
+        }
+
+        digits.parse::<u32>()
+            .map_err(|e| format!("Failed to parse MP value: {}", e))
+    }
 }
 
 /// Initialize OCR service state
 pub fn init_ocr_service() -> Result<OcrServiceState, String> {
     let service = OcrService::new()?;
-    Ok(Mutex::new(service))
+    Ok(Arc::new(Mutex::new(service)))
 }
 
 /// Decode base64 image to DynamicImage
@@ -138,46 +204,94 @@ fn decode_base64_image(base64_data: &str) -> Result<DynamicImage, String> {
 // Tauri Commands
 // ============================================================
 
-/// Recognize level from base64-encoded image
+/// Recognize level from base64-encoded image (async to prevent UI blocking)
 #[tauri::command]
-pub fn recognize_level(
+pub async fn recognize_level(
     state: State<'_, OcrServiceState>,
     image_base64: String,
 ) -> Result<LevelResult, String> {
-    let service = state
-        .lock()
-        .map_err(|e| format!("Failed to lock OCR service: {}", e))?;
+    let service_arc = state.inner().clone();
 
-    let image = decode_base64_image(&image_base64)?;
-    service.recognize_level(&image)
+    // Run OCR in blocking thread pool to avoid blocking async runtime
+    tokio::task::spawn_blocking(move || {
+        let service = service_arc.lock();
+        let image = decode_base64_image(&image_base64)?;
+        service.recognize_level(&image)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
-/// Recognize EXP from base64-encoded image
+/// Recognize EXP from base64-encoded image (async to prevent UI blocking)
 #[tauri::command]
-pub fn recognize_exp(
+pub async fn recognize_exp(
     state: State<'_, OcrServiceState>,
     image_base64: String,
 ) -> Result<ExpResult, String> {
-    let service = state
-        .lock()
-        .map_err(|e| format!("Failed to lock OCR service: {}", e))?;
+    let service_arc = state.inner().clone();
 
-    let image = decode_base64_image(&image_base64)?;
-    service.recognize_exp(&image)
+    // Run OCR in blocking thread pool to avoid blocking async runtime
+    tokio::task::spawn_blocking(move || {
+        let service = service_arc.lock();
+        let image = decode_base64_image(&image_base64)?;
+        service.recognize_exp(&image)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
-/// Recognize map name from base64-encoded image
+/// Recognize map name from base64-encoded image (async to prevent UI blocking)
 #[tauri::command]
-pub fn recognize_map(
+pub async fn recognize_map(
     state: State<'_, OcrServiceState>,
     image_base64: String,
 ) -> Result<MapResult, String> {
-    let service = state
-        .lock()
-        .map_err(|e| format!("Failed to lock OCR service: {}", e))?;
+    let service_arc = state.inner().clone();
 
-    let image = decode_base64_image(&image_base64)?;
-    service.recognize_map(&image)
+    // Run OCR in blocking thread pool to avoid blocking async runtime
+    tokio::task::spawn_blocking(move || {
+        let service = service_arc.lock();
+        let image = decode_base64_image(&image_base64)?;
+        service.recognize_map(&image)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
+/// Tauri command: Recognize HP value from base64 image
+#[tauri::command]
+pub async fn recognize_hp(
+    state: State<'_, OcrServiceState>,
+    image_base64: String,
+) -> Result<u32, String> {
+    let service_arc = state.inner().clone();
+
+    // Run OCR in blocking thread pool
+    tokio::task::spawn_blocking(move || {
+        let service = service_arc.lock();
+        let image = decode_base64_image(&image_base64)?;
+        service.recognize_hp(&image)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
+/// Tauri command: Recognize MP value from base64 image
+#[tauri::command]
+pub async fn recognize_mp(
+    state: State<'_, OcrServiceState>,
+    image_base64: String,
+) -> Result<u32, String> {
+    let service_arc = state.inner().clone();
+
+    // Run OCR in blocking thread pool
+    tokio::task::spawn_blocking(move || {
+        let service = service_arc.lock();
+        let image = decode_base64_image(&image_base64)?;
+        service.recognize_mp(&image)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[cfg(test)]

@@ -8,7 +8,8 @@ use commands::config::{
     open_roi_preview, save_config, save_roi, save_roi_preview, ConfigManagerState,
 };
 use commands::ocr::{
-    init_ocr_service, recognize_exp, recognize_level, recognize_map, OcrServiceState,
+    init_ocr_service, recognize_exp, recognize_hp, recognize_level, recognize_map, recognize_mp,
+    OcrServiceState,
 };
 use commands::screen_capture::{
     capture_full_screen, capture_region, get_screen_dimensions, init_screen_capture,
@@ -62,6 +63,8 @@ pub fn run() {
             recognize_level,
             recognize_exp,
             recognize_map,
+            recognize_hp,
+            recognize_mp,
             start_exp_session,
             add_exp_data,
             reset_exp_session

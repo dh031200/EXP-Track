@@ -32,6 +32,8 @@ imageproc = "0.25"
 # OCR
 tesseract = "0.14"
 regex = "1.10"
+# Async synchronization
+parking_lot = "0.12"
 
 [dev-dependencies]
 tokio-test = "0.4"

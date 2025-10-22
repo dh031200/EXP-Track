@@ -25,25 +25,7 @@ export const ExpTrackerDisplay: React.FC<ExpTrackerDisplayProps> = ({
   ocrStatus,
   averageData,
 }) => {
-  // Don't show error message, only status indicator
-  // if (error) {
-  //   return (
-  //     <div className="exp-tracker-error">
-  //       <div className="error-icon">⚠️</div>
-  //       <div className="error-message">{error}</div>
-  //     </div>
-  //   );
-  // }
-
-  if (!stats && !isTracking) {
-    return (
-      <div className="exp-tracker-empty">
-        <div className="empty-icon">📊</div>
-        <div className="empty-message">추적을 시작하세요</div>
-      </div>
-    );
-  }
-
+  // Always show cards - remove empty state check for better UX
   return (
     <div className="exp-tracker-display">
       {/* Horizontal Statistics Grid - 3 cards */}
