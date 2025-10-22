@@ -1,4 +1,4 @@
-use image::{DynamicImage, GenericImageView, ImageBuffer, Luma};
+use image::{DynamicImage, GenericImageView, ImageBuffer, Luma, Rgb, Rgba};
 use crate::models::config::PreprocessingConfig;
 
 /// Image preprocessing service for OCR optimization
@@ -47,6 +47,14 @@ impl PreprocessingService {
         image.resize(new_width, new_height, image::imageops::FilterType::Lanczos3)
     }
 
+    /// Invert image colors (white text becomes black, black becomes white)
+    pub fn invert(&self, image: &DynamicImage) -> DynamicImage {
+        use image::imageops;
+        let mut img = image.clone();
+        imageops::invert(&mut img);
+        img
+    }
+
     /// Apply binary thresholding (Otsu's method)
     pub fn threshold(&self, image: &DynamicImage) -> DynamicImage {
         use imageproc::contrast::otsu_level;
@@ -64,6 +72,152 @@ impl PreprocessingService {
         });
 
         DynamicImage::ImageLuma8(binary)
+    }
+
+    /// Extract white pixels from HSV color space (for level/exp UI)
+    /// Based on legacy Python implementation
+    pub fn extract_white_hsv(&self, image: &DynamicImage) -> DynamicImage {
+        let rgb_img = image.to_rgb8();
+        let (width, height) = rgb_img.dimensions();
+
+        // Create mask for white pixels
+        let mask = ImageBuffer::from_fn(width, height, |x, y| {
+            let pixel = rgb_img.get_pixel(x, y);
+            let (h, s, v) = Self::rgb_to_hsv(pixel[0], pixel[1], pixel[2]);
+
+            // White range in HSV: S=[0,50], V=[180,255]
+            // Relaxed for colored UI elements: S <= 100, V >= 150
+            let is_white = s <= 100 && v >= 150;
+
+            if is_white {
+                Luma([255u8])
+            } else {
+                Luma([0u8])
+            }
+        });
+
+        DynamicImage::ImageLuma8(mask)
+    }
+
+    /// Preprocess for level ROI (white extraction + morphological operations)
+    pub fn preprocess_level(&self, image: &DynamicImage) -> Result<DynamicImage, String> {
+        // Extract white pixels (numbers on colored background)
+        let white_mask = self.extract_white_hsv(image);
+
+        // Skip morphology for now - test HSV extraction directly
+        // let opened = self.morphology_open(&white_mask, 1);
+        // let closed = self.morphology_close(&opened, 1);
+
+        // Resize 3x for better OCR
+        let resized = self.scale(&white_mask, 3.0);
+
+        Ok(resized)
+    }
+
+    /// Preprocess for EXP ROI (white + green extraction)
+    pub fn preprocess_exp(&self, image: &DynamicImage) -> Result<DynamicImage, String> {
+        let rgb_img = image.to_rgb8();
+        let (width, height) = rgb_img.dimensions();
+
+        // Create mask for white + green pixels
+        let mask = ImageBuffer::from_fn(width, height, |x, y| {
+            let pixel = rgb_img.get_pixel(x, y);
+            let (h, s, v) = Self::rgb_to_hsv(pixel[0], pixel[1], pixel[2]);
+
+            // White: relaxed threshold for UI elements
+            let is_white = s <= 100 && v >= 150;
+
+            // Green (brackets): H=[35,85], S=[40,255], V=[80,255]
+            let is_green = h >= 35 && h <= 85 && s >= 40 && v >= 80;
+
+            if is_white || is_green {
+                Luma([255u8])
+            } else {
+                Luma([0u8])
+            }
+        });
+
+        let mask_img = DynamicImage::ImageLuma8(mask);
+
+        // Skip morphology for now - test extraction directly
+        // let closed = self.morphology_close(&mask_img, 1);
+
+        // Resize 3x for better OCR
+        let resized = self.scale(&mask_img, 3.0);
+
+        Ok(resized)
+    }
+
+    /// Convert RGB to HSV
+    fn rgb_to_hsv(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
+        let r = r as f32 / 255.0;
+        let g = g as f32 / 255.0;
+        let b = b as f32 / 255.0;
+
+        let max = r.max(g).max(b);
+        let min = r.min(g).min(b);
+        let delta = max - min;
+
+        // Hue calculation
+        let h = if delta == 0.0 {
+            0.0
+        } else if max == r {
+            60.0 * (((g - b) / delta) % 6.0)
+        } else if max == g {
+            60.0 * (((b - r) / delta) + 2.0)
+        } else {
+            60.0 * (((r - g) / delta) + 4.0)
+        };
+
+        let h = if h < 0.0 { h + 360.0 } else { h };
+        let h = (h / 2.0) as u8; // OpenCV uses 0-179 for H
+
+        // Saturation calculation
+        let s = if max == 0.0 {
+            0.0
+        } else {
+            delta / max
+        };
+        let s = (s * 255.0) as u8;
+
+        // Value calculation
+        let v = (max * 255.0) as u8;
+
+        (h, s, v)
+    }
+
+    /// Morphological opening (erosion followed by dilation)
+    fn morphology_open(&self, image: &DynamicImage, iterations: u32) -> DynamicImage {
+        use imageproc::morphology::{erode, dilate};
+        use imageproc::distance_transform::Norm;
+
+        let mut result = image.to_luma8();
+
+        for _ in 0..iterations {
+            result = erode(&result, Norm::L1, 1);
+        }
+        for _ in 0..iterations {
+            result = dilate(&result, Norm::L1, 1);
+        }
+
+        DynamicImage::ImageLuma8(result)
+    }
+
+    /// Morphological closing (dilation followed by erosion)
+    fn morphology_close(&self, image: &DynamicImage, iterations: u32) -> DynamicImage {
+        use imageproc::morphology::{erode, dilate};
+        use imageproc::distance_transform::Norm;
+
+        let mut result = image.to_luma8();
+
+        for _ in 0..iterations {
+            result = dilate(&result, Norm::L1, 1);
+        }
+        for _ in 0..iterations {
+            result = erode(&result, Norm::L1, 1);
+        }
+
+        DynamicImage::ImageLuma8(result)
     }
 }
 

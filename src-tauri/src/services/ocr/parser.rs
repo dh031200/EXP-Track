@@ -80,7 +80,7 @@ pub fn parse_exp(text: &str) -> Result<ExpData, String> {
 }
 
 /// Parse map name from OCR text
-/// Expected format: Korean text like "히든스트리트 작은 낙파선"
+/// Expected format: Korean text like "히든스트리트 작은 난파선"
 /// Returns the map name (trimmed, non-empty)
 pub fn parse_map(text: &str) -> Result<String, String> {
     let trimmed = text.trim().to_string();
@@ -259,9 +259,9 @@ mod tests {
 
     #[test]
     fn test_parse_map_valid_korean() {
-        let result = parse_map("히든스트리트 작은 낙파선");
+        let result = parse_map("히든스트리트 작은 난파선");
         assert!(result.is_ok(), "Should parse Korean text");
-        assert_eq!(result.unwrap(), "히든스트리트 작은 낙파선");
+        assert_eq!(result.unwrap(), "히든스트리트 작은 난파선");
     }
 
     #[test]
@@ -273,16 +273,16 @@ mod tests {
 
     #[test]
     fn test_parse_map_with_leading_whitespace() {
-        let result = parse_map("  히든스트리트 작은 낙파선");
+        let result = parse_map("  히든스트리트 작은 난파선");
         assert!(result.is_ok(), "Should trim leading whitespace");
-        assert_eq!(result.unwrap(), "히든스트리트 작은 낙파선");
+        assert_eq!(result.unwrap(), "히든스트리트 작은 난파선");
     }
 
     #[test]
     fn test_parse_map_with_trailing_whitespace() {
-        let result = parse_map("히든스트리트 작은 낙파선  ");
+        let result = parse_map("히든스트리트 작은 난파선  ");
         assert!(result.is_ok(), "Should trim trailing whitespace");
-        assert_eq!(result.unwrap(), "히든스트리트 작은 낙파선");
+        assert_eq!(result.unwrap(), "히든스트리트 작은 난파선");
     }
 
     #[test]

@@ -20,15 +20,83 @@ impl TesseractEngine {
 
     /// Configure Tesseract for single line recognition (game UI)
     fn configure_single_line(mut tesseract: Tesseract) -> Result<Tesseract, String> {
+        // PSM_SINGLE_LINE (7) works best for game UI text
         tesseract.set_page_seg_mode(PageSegMode::PsmSingleLine);
         Ok(tesseract)
     }
 
+    /// Configure Tesseract for multi-line recognition
+    fn configure_multi_line(mut tesseract: Tesseract) -> Result<Tesseract, String> {
+        // PSM_SINGLE_BLOCK (6) works for multi-line text blocks
+        tesseract.set_page_seg_mode(PageSegMode::PsmSingleBlock);
+        Ok(tesseract)
+    }
+
     /// Set character whitelist for better accuracy
-    fn set_whitelist(tesseract: Tesseract, whitelist: &str) -> Result<Tesseract, String> {
+    pub fn set_whitelist(tesseract: Tesseract, whitelist: &str) -> Result<Tesseract, String> {
         tesseract
             .set_variable("tessedit_char_whitelist", whitelist)
             .map_err(|e| format!("Failed to set whitelist: {}", e))
+    }
+
+    /// Recognize with custom configuration
+    pub fn recognize_with_config(
+        &self,
+        image: &DynamicImage,
+        lang: &str,
+        whitelist: Option<&str>,
+    ) -> Result<String, String> {
+        let mut img_bytes: Vec<u8> = Vec::new();
+        image
+            .write_to(
+                &mut std::io::Cursor::new(&mut img_bytes),
+                image::ImageFormat::Png,
+            )
+            .map_err(|e| format!("Failed to encode image: {}", e))?;
+
+        let tesseract = Tesseract::new(None, Some(lang))
+            .map_err(|e| format!("Failed to create Tesseract instance: {}", e))?;
+
+        let tesseract = Self::configure_single_line(tesseract)?;
+
+        // Apply whitelist if provided
+        let tesseract = if let Some(wl) = whitelist {
+            Self::set_whitelist(tesseract, wl)?
+        } else {
+            tesseract
+        };
+
+        let text = tesseract
+            .set_image_from_mem(&img_bytes)
+            .map_err(|e| format!("Failed to set image: {}", e))?
+            .get_text()
+            .map_err(|e| format!("Failed to recognize text: {}", e))?;
+
+        Ok(text)
+    }
+
+    /// Recognize multi-line text
+    pub fn recognize_multiline(&self, image: &DynamicImage, lang: &str) -> Result<String, String> {
+        let mut img_bytes: Vec<u8> = Vec::new();
+        image
+            .write_to(
+                &mut std::io::Cursor::new(&mut img_bytes),
+                image::ImageFormat::Png,
+            )
+            .map_err(|e| format!("Failed to encode image: {}", e))?;
+
+        let tesseract = Tesseract::new(None, Some(lang))
+            .map_err(|e| format!("Failed to create Tesseract instance: {}", e))?;
+
+        let tesseract = Self::configure_multi_line(tesseract)?;
+
+        let text = tesseract
+            .set_image_from_mem(&img_bytes)
+            .map_err(|e| format!("Failed to set image: {}", e))?
+            .get_text()
+            .map_err(|e| format!("Failed to recognize text: {}", e))?;
+
+        Ok(text)
     }
 }
 

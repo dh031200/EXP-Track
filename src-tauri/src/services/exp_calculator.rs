@@ -6,6 +6,7 @@ pub struct ExpCalculator {
     initial_data: Option<ExpData>,
     last_data: Option<ExpData>,
     start_time: Option<Instant>,
+    start_level: u32,  // Original starting level (never changes after session start)
     completed_levels_exp: u64,
     completed_levels_percentage: f64,
     paused_duration: Duration,
@@ -21,6 +22,7 @@ impl ExpCalculator {
             initial_data: None,
             last_data: None,
             start_time: None,
+            start_level: 0,
             completed_levels_exp: 0,
             completed_levels_percentage: 0.0,
             paused_duration: Duration::ZERO,
@@ -29,6 +31,7 @@ impl ExpCalculator {
 
     /// Start tracking with initial data
     pub fn start(&mut self, data: ExpData) {
+        self.start_level = data.level;  // Save original starting level
         self.initial_data = Some(data.clone());
         self.last_data = Some(data);
         self.start_time = Some(Instant::now());
@@ -104,6 +107,18 @@ impl ExpCalculator {
             0
         };
 
+        // Get current and start levels (before moving data)
+        let current_level = data.level;
+        let start_level = self.start_level;  // Use stored start level (never changes)
+        let levels_gained = current_level.saturating_sub(start_level);
+
+        // Calculate per-minute average
+        let exp_per_minute = if elapsed_seconds > 0 {
+            (total_exp * 60) / elapsed_seconds
+        } else {
+            0
+        };
+
         self.last_data = Some(data);
 
         Ok(ExpStats {
@@ -114,6 +129,10 @@ impl ExpCalculator {
             exp_per_hour,
             percentage_per_hour,
             meso_per_hour,
+            exp_per_minute,
+            current_level,
+            start_level,
+            levels_gained,
         })
     }
 
@@ -122,6 +141,7 @@ impl ExpCalculator {
         self.initial_data = None;
         self.last_data = None;
         self.start_time = None;
+        self.start_level = 0;
         self.completed_levels_exp = 0;
         self.completed_levels_percentage = 0.0;
         self.paused_duration = Duration::ZERO;
@@ -191,6 +211,9 @@ mod tests {
         assert_eq!(stats.total_percentage, 5.0);
         assert_eq!(stats.total_meso, 1000);
         assert!(stats.elapsed_seconds >= 0);
+        assert_eq!(stats.current_level, 50);
+        assert_eq!(stats.start_level, 50);
+        assert_eq!(stats.levels_gained, 0);
     }
 
     #[test]
@@ -226,6 +249,9 @@ mod tests {
         // Should calculate: (10000 - 9500) from level 50 + 200 from level 51
         assert_eq!(stats.total_exp, 500 + 200);
         assert_eq!(stats.total_percentage, 5.0 + 2.0);
+        assert_eq!(stats.current_level, 51);
+        assert_eq!(stats.start_level, 50);
+        assert_eq!(stats.levels_gained, 1);
     }
 
     #[test]
@@ -261,6 +287,38 @@ mod tests {
 
         // 5000 meso in 600 seconds = (5000 / 600) * 3600 = 30000 meso/hour
         assert_eq!(stats.meso_per_hour, 30000);
+
+        // 1000 EXP in 600 seconds = (1000 / 600) * 60 = 100 EXP/minute
+        assert_eq!(stats.exp_per_minute, 100);
+    }
+
+    #[test]
+    fn test_exp_per_minute_calculation() {
+        let mut calculator = ExpCalculator::new().unwrap();
+
+        let initial = ExpData {
+            level: 50,
+            exp: 0,
+            percentage: 0.0,
+            meso: None,
+        };
+
+        calculator.start(initial);
+
+        // Manually set elapsed time to 600 seconds (10 minutes)
+        calculator.start_time = Some(Instant::now() - Duration::from_secs(600));
+
+        let updated = ExpData {
+            level: 50,
+            exp: 6000,
+            percentage: 60.0,
+            meso: None,
+        };
+
+        let stats = calculator.update(updated).unwrap();
+
+        // 6000 EXP in 600 seconds (10 minutes) = 600 EXP/minute
+        assert_eq!(stats.exp_per_minute, 600);
     }
 
     #[test]

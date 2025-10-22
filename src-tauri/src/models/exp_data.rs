@@ -1,6 +1,47 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Single snapshot of player's experience at a specific time
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ExpSnapshot {
+    pub timestamp: u64,  // Unix timestamp in seconds
+    pub level: u32,
+    pub exp: u64,        // Current EXP within level
+    pub percentage: f64, // Percentage to next level
+    pub meso: Option<u64>,
+}
+
+impl ExpSnapshot {
+    /// Create a new snapshot with current timestamp
+    pub fn new(level: u32, exp: u64, percentage: f64, meso: Option<u64>) -> Self {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        Self {
+            timestamp,
+            level,
+            exp,
+            percentage,
+            meso,
+        }
+    }
+
+    /// Create snapshot with custom timestamp (for testing)
+    pub fn with_timestamp(timestamp: u64, level: u32, exp: u64, percentage: f64, meso: Option<u64>) -> Self {
+        Self {
+            timestamp,
+            level,
+            exp,
+            percentage,
+            meso,
+        }
+    }
+}
+
+/// Legacy alias for backwards compatibility
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ExpData {
     pub level: u32,
@@ -9,6 +50,46 @@ pub struct ExpData {
     pub meso: Option<u64>,
 }
 
+/// Tracking session data
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ExpSession {
+    pub start_snapshot: ExpSnapshot,
+    pub current_snapshot: Option<ExpSnapshot>,
+    pub snapshots: Vec<ExpSnapshot>,
+}
+
+impl ExpSession {
+    /// Create a new session with starting snapshot
+    pub fn new(start_snapshot: ExpSnapshot) -> Self {
+        Self {
+            start_snapshot: start_snapshot.clone(),
+            current_snapshot: Some(start_snapshot.clone()),
+            snapshots: vec![start_snapshot],
+        }
+    }
+
+    /// Add a new snapshot to the session
+    pub fn add_snapshot(&mut self, snapshot: ExpSnapshot) {
+        self.current_snapshot = Some(snapshot.clone());
+        self.snapshots.push(snapshot);
+    }
+
+    /// Get elapsed time in seconds
+    pub fn elapsed_seconds(&self) -> u64 {
+        if let Some(current) = &self.current_snapshot {
+            current.timestamp.saturating_sub(self.start_snapshot.timestamp)
+        } else {
+            0
+        }
+    }
+
+    /// Get total snapshots count
+    pub fn snapshot_count(&self) -> usize {
+        self.snapshots.len()
+    }
+}
+
+/// Statistics calculated from session data
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ExpStats {
     pub total_exp: u64,
@@ -18,6 +99,10 @@ pub struct ExpStats {
     pub exp_per_hour: u64,
     pub percentage_per_hour: f64,
     pub meso_per_hour: u64,
+    pub exp_per_minute: u64,
+    pub current_level: u32,
+    pub start_level: u32,
+    pub levels_gained: u32,
 }
 
 pub struct LevelExpTable {
@@ -94,10 +179,18 @@ mod tests {
             exp_per_hour: 6000,
             percentage_per_hour: 63.0,
             meso_per_hour: 300000,
+            exp_per_minute: 100,
+            current_level: 126,
+            start_level: 126,
+            levels_gained: 0,
         };
 
         assert_eq!(stats.total_exp, 1000);
         assert_eq!(stats.elapsed_seconds, 600);
         assert_eq!(stats.exp_per_hour, 6000);
+        assert_eq!(stats.exp_per_minute, 100);
+        assert_eq!(stats.current_level, 126);
+        assert_eq!(stats.start_level, 126);
+        assert_eq!(stats.levels_gained, 0);
     }
 }

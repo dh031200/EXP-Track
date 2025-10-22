@@ -14,6 +14,11 @@ use commands::screen_capture::{
     capture_full_screen, capture_region, get_screen_dimensions, init_screen_capture,
     ScreenCaptureState,
 };
+use commands::exp::{
+    add_exp_data, reset_exp_session, start_exp_session, ExpCalculatorState,
+};
+use services::exp_calculator::ExpCalculator;
+use std::sync::Mutex;
 
 // Placeholder command for initial setup
 #[tauri::command]
@@ -29,11 +34,16 @@ pub fn run() {
     // Initialize OCR service
     let ocr_service = init_ocr_service().expect("Failed to initialize OCR service");
 
+    // Initialize EXP calculator
+    let exp_calculator = ExpCalculator::new().expect("Failed to initialize EXP calculator");
+    let exp_calculator_state = ExpCalculatorState(Mutex::new(exp_calculator));
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(ScreenCaptureState::default())
         .manage(config_manager)
         .manage(ocr_service)
+        .manage(exp_calculator_state)
         .invoke_handler(tauri::generate_handler![
             greet,
             init_screen_capture,
@@ -51,7 +61,10 @@ pub fn run() {
             open_roi_preview,
             recognize_level,
             recognize_exp,
-            recognize_map
+            recognize_map,
+            start_exp_session,
+            add_exp_data,
+            reset_exp_session
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
