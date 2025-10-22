@@ -36,33 +36,30 @@ pub fn parse_level(text: &str) -> Result<u32, String> {
 }
 
 /// Parse EXP from OCR text
-/// Expected format: "5509611[12.76%]" or "1000000[50%]"
+/// Expected format: "5509611[12.76%]" or "1000000[50%]" or "46185718.57%"
+/// Brackets are optional - matches legacy Python parser behavior
 /// Returns ExpData with absolute value and percentage
 pub fn parse_exp(text: &str) -> Result<ExpData, String> {
-    // Pattern 1: Extract absolute value (digits before bracket)
-    let abs_re = Regex::new(r"(\d+)\s*\[").unwrap();
-    // Pattern 2: Extract percentage (number inside brackets with %)
-    let pct_re = Regex::new(r"\[\s*(\d+\.?\d*)\s*%\s*\]").unwrap();
+    // Flexible pattern that makes brackets optional (like legacy Python code)
+    // Matches: "5509611[12.76%]" or "46185718.57%" or "1000000 [50%]"
+    // Pattern: digits + optional whitespace + optional bracket + percentage + optional bracket
+    let pattern = Regex::new(r"(\d+)\s*\[?\s*(\d+\.?\d*)\s*%\s*\]?").unwrap();
 
-    // Extract absolute value
-    let abs_captures = abs_re
+    let captures = pattern
         .captures(text)
-        .ok_or_else(|| format!("Could not parse absolute EXP from: {}", text))?;
+        .ok_or_else(|| format!("Could not parse EXP from: {}", text))?;
 
-    let absolute: u64 = abs_captures
+    // Extract absolute value (group 1)
+    let absolute: u64 = captures
         .get(1)
         .ok_or("No absolute value found")?
         .as_str()
         .parse()
         .map_err(|e| format!("Failed to parse absolute EXP: {}", e))?;
 
-    // Extract percentage
-    let pct_captures = pct_re
-        .captures(text)
-        .ok_or_else(|| format!("Could not parse percentage from: {}", text))?;
-
-    let percentage: f64 = pct_captures
-        .get(1)
+    // Extract percentage (group 2)
+    let percentage: f64 = captures
+        .get(2)
         .ok_or("No percentage found")?
         .as_str()
         .parse()
@@ -220,9 +217,37 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_exp_invalid_no_brackets() {
-        let result = parse_exp("5509611");
-        assert!(result.is_err(), "Should fail without brackets");
+    fn test_parse_exp_valid_no_brackets() {
+        // Test the case from user's error: " 46185718.57%"
+        // Format: absolute value + space + percentage without brackets
+        let result = parse_exp(" 4618571 8.57%");
+        assert!(result.is_ok(), "Should parse without brackets (like legacy Python parser)");
+
+        let exp_data = result.unwrap();
+        assert_eq!(exp_data.absolute, 4618571);
+        assert!((exp_data.percentage - 8.57).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_parse_exp_valid_user_format() {
+        // Test the actual user format: "461857[8.57%]"
+        // This should parse as: absolute=461857, percentage=8.57
+        let result = parse_exp("461857[8.57%]");
+        assert!(result.is_ok(), "Should parse user's actual format");
+
+        let exp_data = result.unwrap();
+        assert_eq!(exp_data.absolute, 461857);
+        assert!((exp_data.percentage - 8.57).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_parse_exp_valid_no_brackets_integer() {
+        let result = parse_exp("1000000 50%");
+        assert!(result.is_ok(), "Should parse without brackets");
+
+        let exp_data = result.unwrap();
+        assert_eq!(exp_data.absolute, 1000000);
+        assert_eq!(exp_data.percentage, 50.0);
     }
 
     #[test]

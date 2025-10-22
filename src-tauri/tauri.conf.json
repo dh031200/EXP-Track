@@ -14,9 +14,9 @@
     "windows": [
       {
         "title": "exp-tracker-temp",
-        "width": 550,
+        "width": 480,
         "height": 300,
-        "minWidth": 550,
+        "minWidth": 480,
         "minHeight": 300,
         "resizable": true,
         "transparent": true,

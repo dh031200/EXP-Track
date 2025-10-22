@@ -31,6 +31,7 @@ impl ExpCalculator {
 
     /// Start tracking with initial data
     pub fn start(&mut self, data: ExpData) {
+        println!("🦀 [Calculator] Session started: level={}, exp={}, percentage={}", data.level, data.exp, data.percentage);
         self.start_level = data.level;  // Save original starting level
         self.initial_data = Some(data.clone());
         self.last_data = Some(data);
@@ -42,11 +43,36 @@ impl ExpCalculator {
 
     /// Update with new data and calculate statistics
     pub fn update(&mut self, data: ExpData) -> Result<ExpStats, String> {
+        println!("🦀 [Calculator] update() called: level={}, exp={}, percentage={}", data.level, data.exp, data.percentage);
+
         let initial = self
             .initial_data
             .as_ref()
             .ok_or("Calculator not started")?;
-        let last = self.last_data.as_ref().ok_or("No previous data")?;
+
+        // Clone last_data early to avoid borrow conflicts
+        let last = self.last_data.as_ref().ok_or("No previous data")?.clone();
+
+        println!("🦀 [Calculator] initial_data: level={}, exp={}, percentage={}", initial.level, initial.exp, initial.percentage);
+        println!("🦀 [Calculator] last_data: level={}, exp={}, percentage={}", last.level, last.exp, last.percentage);
+
+        // Detect OCR errors: if new exp is significantly smaller than initial, reset baseline
+        // This handles cases where the first OCR read was wrong (e.g., 4618571 instead of 461857)
+        if data.level == initial.level && data.exp < initial.exp {
+            let ratio = initial.exp as f64 / data.exp.max(1) as f64;
+            println!("🦀 [Calculator] 🔍 OCR Check: ratio={:.2}x (threshold=10.0x)", ratio);
+            // Use 10x threshold to avoid false positives (OCR digit errors typically add/remove a digit)
+            if ratio >= 10.0 {
+                println!("🦀 [Calculator] ⚠️ OCR ERROR DETECTED: initial_exp={} is {:.1}x larger than current_exp={}", initial.exp, ratio, data.exp);
+                println!("🦀 [Calculator] 🔄 Resetting baseline to current value (likely first read was corrupted)");
+                self.initial_data = Some(data.clone());
+                // Reset last_data too to avoid confusing the next update
+                self.last_data = Some(data.clone());
+            }
+        }
+
+        // Re-fetch initial after potential reset
+        let initial = self.initial_data.as_ref().unwrap();
 
         // Handle level up
         if data.level > last.level {
@@ -72,9 +98,14 @@ impl ExpCalculator {
 
         // Calculate accumulated values
         let initial = self.initial_data.as_ref().unwrap();
-        let total_exp = (data.exp.saturating_sub(initial.exp)) + self.completed_levels_exp;
-        let total_percentage =
-            (data.percentage - initial.percentage) + self.completed_levels_percentage;
+        let exp_diff = data.exp.saturating_sub(initial.exp);
+        let total_exp = exp_diff + self.completed_levels_exp;
+        let percentage_diff = data.percentage - initial.percentage;
+        let total_percentage = percentage_diff + self.completed_levels_percentage;
+
+        println!("🦀 [Calculator] Calculation: data.exp={} - initial.exp={} = exp_diff={}", data.exp, initial.exp, exp_diff);
+        println!("🦀 [Calculator] Calculation: total_exp = {} + {} = {}", exp_diff, self.completed_levels_exp, total_exp);
+        println!("🦀 [Calculator] Calculation: percentage_diff={}, total_percentage={}", percentage_diff, total_percentage);
         let total_meso = data
             .meso
             .unwrap_or(0)

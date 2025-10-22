@@ -4,11 +4,14 @@ import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { RoiConfigModal } from "./components/RoiConfigModal";
 import { Settings } from "./components/Settings";
 import { TimerSettingsModal } from "./components/TimerSettingsModal";
+import { ExpTrackerDisplay } from "./components/ExpTrackerDisplay";
 import { useSettingsStore } from "./stores/settingsStore";
 import { useRoiStore } from "./stores/roiStore";
 import { useTrackingStore } from "./stores/trackingStore";
 import { useSessionStore } from "./stores/sessionStore";
 import { useTimerSettingsStore } from "./stores/timerSettingsStore";
+import { useExpTracker } from "./hooks/useExpTracker";
+import { initScreenCapture } from "./lib/tauri";
 import "./App.css";
 
 // Import icons
@@ -36,7 +39,6 @@ function App() {
     pauseTracking,
     resetTracking,
     incrementTimer,
-    getActiveDuration
   } = useTrackingStore();
 
   const {
@@ -48,8 +50,25 @@ function App() {
 
   const { selectedAverageInterval } = useTimerSettingsStore();
 
+  // EXP Tracker hook
+  const expTracker = useExpTracker();
+
   // Check if any ROI is configured
   const hasAnyRoi = levelRoi !== null || expRoi !== null || mapLocationRoi !== null;
+
+  // Initialize screen capture on app start
+  useEffect(() => {
+    const initCapture = async () => {
+      try {
+        await initScreenCapture();
+        console.log('Screen capture initialized successfully');
+      } catch (error) {
+        console.error('Failed to initialize screen capture:', error);
+      }
+    };
+
+    initCapture();
+  }, []); // Run only once on mount
 
   // Timer effect - increment every second when tracking
   useEffect(() => {
@@ -57,12 +76,11 @@ function App() {
       const interval = setInterval(() => {
         incrementTimer();
         // Update current session duration
-        const activeDuration = getActiveDuration();
         updateSessionDuration(elapsedSeconds + 1, pausedSeconds);
       }, 1000);
       return () => clearInterval(interval);
     }
-  }, [trackingState, incrementTimer, elapsedSeconds, pausedSeconds, getActiveDuration, updateSessionDuration]);
+  }, [trackingState, incrementTimer, elapsedSeconds, pausedSeconds, updateSessionDuration]);
 
   // Format elapsed seconds as HH:MM:SS
   const formatTime = (seconds: number): string => {
@@ -112,7 +130,7 @@ function App() {
     setIsSelecting(selecting);
   }, []);
 
-  const handleToggleTracking = () => {
+  const handleToggleTracking = async () => {
     if (!hasAnyRoi) {
       setShowRoiModal(true);
       return;
@@ -122,25 +140,29 @@ function App() {
       // Start new session
       startSession();
       startTracking();
-      // TODO: Start OCR and exp recording
+      // Start OCR and exp recording
+      await expTracker.start();
     } else if (trackingState === 'paused') {
       // Resume tracking
       startTracking();
-      // TODO: Resume OCR and exp recording
+      // Resume OCR and exp recording
+      await expTracker.start();
     } else if (trackingState === 'tracking') {
       // Pause tracking
       pauseTracking();
-      // TODO: Pause OCR and exp recording
+      // Pause OCR and exp recording
+      expTracker.stop();
     }
   };
 
-  const handleReset = () => {
+  const handleReset = async () => {
     if (trackingState !== 'idle') {
       // Save session to history before resetting
       endSession();
     }
     resetTracking();
-    // TODO: Clear exp data and reset to initial state
+    // Clear exp data and reset to initial state
+    await expTracker.reset();
   };
 
   const handleClose = async () => {
@@ -313,7 +335,7 @@ function App() {
       <main className="container" style={{
         background: isSelecting ? 'transparent' : 'rgba(255, 255, 255, 0.98)',
         marginTop: isSelecting ? '0' : '44px',
-        padding: isSelecting ? '0' : '16px',
+        padding: isSelecting ? '0' : '16px 16px 30px 16px', /* top right bottom left */
         height: isSelecting ? '100%' : 'calc(100% - 44px)',
         borderBottomLeftRadius: isSelecting ? '0' : '12px',
         borderBottomRightRadius: isSelecting ? '0' : '12px',
@@ -323,10 +345,39 @@ function App() {
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: '12px'
+        gap: '12px',
+        position: 'relative'
       }}>
         {!isSelecting && !showSettings && (
           <>
+            {/* OCR Status Indicator - Top Left of main container */}
+            {(expTracker.state.isTracking || expTracker.state.stats) && (
+              <div style={{
+                position: 'absolute',
+                top: '12px',
+                left: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '3px',
+                padding: '3px 6px',
+                background: 'rgba(0, 0, 0, 0.02)',
+                borderRadius: '4px',
+                zIndex: 10
+              }}>
+                <span style={{ fontSize: '10px', lineHeight: 1 }}>
+                  {expTracker.state.ocrStatus === 'success' && '🟢'}
+                  {expTracker.state.ocrStatus === 'warning' && '🟡'}
+                  {expTracker.state.ocrStatus === 'error' && '🔴'}
+                </span>
+                <span style={{
+                  fontSize: '9px',
+                  fontWeight: 600,
+                  color: '#666',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px'
+                }}>OCR</span>
+              </div>
+            )}
             {/* Central controls: Start/Pause toggle + Timer */}
             <div style={{
               display: 'flex',
@@ -378,9 +429,9 @@ function App() {
                 />
               </button>
 
-              {/* Timer Display - Much Larger */}
+              {/* Timer Display - Compact Size */}
               <div style={{
-                fontSize: '56px',
+                fontSize: '32px',
                 fontWeight: '700',
                 color: trackingState === 'tracking' ? '#4CAF50' : '#666',
                 fontFamily: 'monospace',
@@ -391,46 +442,29 @@ function App() {
               </div>
             </div>
 
-            {/* Status text */}
-            <div style={{
-              fontSize: '12px',
-              color: !hasAnyRoi ? '#FF9800' : trackingState === 'tracking' ? '#4CAF50' : '#666',
-              fontWeight: '500',
-              textAlign: 'center',
-              marginTop: '8px'
-            }}>
-              {!hasAnyRoi ? 'ROI 설정 필요' : trackingState === 'tracking' ? '추적 중...' : trackingState === 'paused' ? '일시정지됨' : '준비됨'}
-            </div>
 
-            {/* Average EXP Display */}
-            {averageData && (
+            {/* EXP Tracker Display - Only show when tracking or has data */}
+            {(expTracker.state.isTracking || expTracker.state.stats) && (
               <div style={{
-                marginTop: '4px',
-                padding: '6px 12px',
-                background: 'rgba(102, 126, 234, 0.08)',
-                border: '1px solid rgba(102, 126, 234, 0.2)',
-                borderRadius: '6px',
-                display: 'inline-block'
+                width: '100%',
+                maxWidth: '400px',
+                marginTop: '10px' /* Reduced from 16px */
               }}>
-                <div style={{
-                  fontSize: '10px',
-                  color: '#667eea',
-                  fontWeight: '600',
-                  marginBottom: '2px',
-                  letterSpacing: '0.5px'
-                }}>
-                  평균 ({averageData.label})
-                </div>
-                <div style={{
-                  fontSize: '14px',
-                  color: '#667eea',
-                  fontWeight: '700',
-                  fontFamily: 'monospace'
-                }}>
-                  {averageData.value} 경험치
-                </div>
+                <ExpTrackerDisplay
+                  stats={expTracker.state.stats}
+                  level={expTracker.state.level}
+                  exp={expTracker.state.exp}
+                  percentage={expTracker.state.percentage}
+                  mapName={expTracker.state.mapName}
+                  isTracking={expTracker.state.isTracking}
+                  error={expTracker.state.error}
+                  ocrStatus={expTracker.state.ocrStatus}
+                  averageData={calculateAverage()}
+                />
               </div>
             )}
+
+            {/* Average EXP Display removed - now integrated into ExpTrackerDisplay */}
 
             {/* Bottom-left reset button */}
             <div style={{
@@ -442,9 +476,9 @@ function App() {
                 onClick={handleReset}
                 disabled={trackingState === 'idle'}
                 style={{
-                  width: '48px',
-                  height: '48px',
-                  borderRadius: '8px',
+                  width: '30px',
+                  height: '30px',
+                  borderRadius: '6px',
                   border: '1px solid rgba(0, 0, 0, 0.1)',
                   background: 'rgba(0, 0, 0, 0.05)',
                   cursor: trackingState !== 'idle' ? 'pointer' : 'not-allowed',
@@ -470,7 +504,7 @@ function App() {
                 <img
                   src={resetIcon}
                   alt="Reset"
-                  style={{ width: '24px', height: '24px' }}
+                  style={{ width: '20px', height: '20px' }}
                 />
               </button>
             </div>
@@ -486,11 +520,11 @@ function App() {
               <button
                 onClick={() => setShowTimerSettings(true)}
                 style={{
-                  width: '40px',
-                  height: '40px',
+                  width: '30px',
+                  height: '30px',
                   background: 'rgba(0, 0, 0, 0.05)',
                   border: '1px solid rgba(0, 0, 0, 0.1)',
-                  borderRadius: '8px',
+                  borderRadius: '6px',
                   cursor: 'pointer',
                   transition: 'all 0.15s ease',
                   padding: 0,
@@ -508,16 +542,16 @@ function App() {
                 }}
                 title="타이머 설정"
               >
-                <img src={timerIcon} alt="Timer" style={{ width: '24px', height: '24px' }} />
+                <img src={timerIcon} alt="Timer" style={{ width: '20px', height: '20px' }} />
               </button>
               <button
                 onClick={handleOpenHistory}
                 style={{
-                  width: '40px',
-                  height: '40px',
+                  width: '30px',
+                  height: '30px',
                   background: 'rgba(0, 0, 0, 0.05)',
                   border: '1px solid rgba(0, 0, 0, 0.1)',
-                  borderRadius: '8px',
+                  borderRadius: '6px',
                   cursor: 'pointer',
                   transition: 'all 0.15s ease',
                   padding: 0,
@@ -535,16 +569,16 @@ function App() {
                 }}
                 title="히스토리"
               >
-                <img src={historyIcon} alt="History" style={{ width: '24px', height: '24px' }} />
+                <img src={historyIcon} alt="History" style={{ width: '20px', height: '20px' }} />
               </button>
               <button
                 onClick={() => setShowRoiModal(true)}
                 style={{
-                  width: '40px',
-                  height: '40px',
+                  width: '30px',
+                  height: '30px',
                   background: 'rgba(0, 0, 0, 0.05)',
                   border: '1px solid rgba(0, 0, 0, 0.1)',
-                  borderRadius: '8px',
+                  borderRadius: '6px',
                   cursor: 'pointer',
                   transition: 'all 0.15s ease',
                   padding: 0,
@@ -562,16 +596,16 @@ function App() {
                 }}
                 title="ROI 설정"
               >
-                <img src={roiIcon} alt="ROI" style={{ width: '24px', height: '24px' }} />
+                <img src={roiIcon} alt="ROI" style={{ width: '20px', height: '20px' }} />
               </button>
               <button
                 onClick={() => setShowSettings(true)}
                 style={{
-                  width: '40px',
-                  height: '40px',
+                  width: '30px',
+                  height: '30px',
                   background: 'rgba(0, 0, 0, 0.05)',
                   border: '1px solid rgba(0, 0, 0, 0.1)',
-                  borderRadius: '8px',
+                  borderRadius: '6px',
                   cursor: 'pointer',
                   transition: 'all 0.15s ease',
                   padding: 0,
@@ -589,7 +623,7 @@ function App() {
                 }}
                 title="설정"
               >
-                <img src={settingIcon} alt="Settings" style={{ width: '24px', height: '24px' }} />
+                <img src={settingIcon} alt="Settings" style={{ width: '20px', height: '20px' }} />
               </button>
             </div>
           </>

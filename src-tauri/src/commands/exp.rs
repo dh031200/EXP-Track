@@ -38,6 +38,8 @@ pub fn add_exp_data(
     percentage: f64,
     meso: Option<u64>,
 ) -> Result<ExpStats, String> {
+    println!("🦀 [Rust] add_exp_data called: level={}, exp={}, percentage={}", level, exp, percentage);
+
     let mut calculator = state.0.lock().map_err(|e| format!("Failed to lock calculator: {}", e))?;
 
     let data = ExpData {
@@ -47,7 +49,14 @@ pub fn add_exp_data(
         meso,
     };
 
-    calculator.update(data)
+    let result = calculator.update(data);
+
+    match &result {
+        Ok(stats) => println!("🦀 [Rust] Calculated stats: total_exp={}, total_percentage={}", stats.total_exp, stats.total_percentage),
+        Err(e) => println!("🦀 [Rust] Error: {}", e),
+    }
+
+    result
 }
 
 /// Get current EXP statistics

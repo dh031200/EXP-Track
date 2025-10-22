@@ -141,7 +141,7 @@ fn decode_base64_image(base64_data: &str) -> Result<DynamicImage, String> {
 /// Recognize level from base64-encoded image
 #[tauri::command]
 pub fn recognize_level(
-    state: State<OcrServiceState>,
+    state: State<'_, OcrServiceState>,
     image_base64: String,
 ) -> Result<LevelResult, String> {
     let service = state
@@ -155,7 +155,7 @@ pub fn recognize_level(
 /// Recognize EXP from base64-encoded image
 #[tauri::command]
 pub fn recognize_exp(
-    state: State<OcrServiceState>,
+    state: State<'_, OcrServiceState>,
     image_base64: String,
 ) -> Result<ExpResult, String> {
     let service = state
@@ -169,7 +169,7 @@ pub fn recognize_exp(
 /// Recognize map name from base64-encoded image
 #[tauri::command]
 pub fn recognize_map(
-    state: State<OcrServiceState>,
+    state: State<'_, OcrServiceState>,
     image_base64: String,
 ) -> Result<MapResult, String> {
     let service = state

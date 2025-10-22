@@ -135,9 +135,6 @@ export function HistoryDashboard({ isOpen, onClose }: HistoryDashboardProps) {
                 <div className="average-value">{calculateAverage(60)}</div>
               </div>
             </div>
-            <p className="averages-note">
-              * OCR 구현 후 실제 경험치 데이터가 표시됩니다
-            </p>
           </div>
 
           {/* Recent Sessions List */}
