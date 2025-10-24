@@ -10,6 +10,13 @@ pub struct ExpCalculator {
     completed_levels_exp: u64,
     completed_levels_percentage: f64,
     paused_duration: Duration,
+    // HP/MP tracking
+    last_hp: Option<u32>,
+    last_mp: Option<u32>,
+    hp_potions_used: u32,
+    mp_potions_used: u32,
+    max_hp: Option<u32>,  // Maximum HP for detecting recovery
+    max_mp: Option<u32>,  // Maximum MP for detecting recovery
 }
 
 impl ExpCalculator {
@@ -26,11 +33,18 @@ impl ExpCalculator {
             completed_levels_exp: 0,
             completed_levels_percentage: 0.0,
             paused_duration: Duration::ZERO,
+            last_hp: None,
+            last_mp: None,
+            hp_potions_used: 0,
+            mp_potions_used: 0,
+            max_hp: None,
+            max_mp: None,
         })
     }
 
     /// Start tracking with initial data
     pub fn start(&mut self, data: ExpData) {
+        #[cfg(debug_assertions)]
         println!("🦀 [Calculator] Session started: level={}, exp={}, percentage={}", data.level, data.exp, data.percentage);
         self.start_level = data.level;  // Save original starting level
         self.initial_data = Some(data.clone());
@@ -43,6 +57,7 @@ impl ExpCalculator {
 
     /// Update with new data and calculate statistics
     pub fn update(&mut self, data: ExpData) -> Result<ExpStats, String> {
+        #[cfg(debug_assertions)]
         println!("🦀 [Calculator] update() called: level={}, exp={}, percentage={}", data.level, data.exp, data.percentage);
 
         let initial = self
@@ -53,8 +68,11 @@ impl ExpCalculator {
         // Clone last_data early to avoid borrow conflicts
         let last = self.last_data.as_ref().ok_or("No previous data")?.clone();
 
-        println!("🦀 [Calculator] initial_data: level={}, exp={}, percentage={}", initial.level, initial.exp, initial.percentage);
-        println!("🦀 [Calculator] last_data: level={}, exp={}, percentage={}", last.level, last.exp, last.percentage);
+        #[cfg(debug_assertions)]
+        {
+            println!("🦀 [Calculator] initial_data: level={}, exp={}, percentage={}", initial.level, initial.exp, initial.percentage);
+            println!("🦀 [Calculator] last_data: level={}, exp={}, percentage={}", last.level, last.exp, last.percentage);
+        }
 
         // Detect OCR errors: if exp change is unrealistic (>10x or <0.1x from last reading)
         // This handles cases where OCR misreads digits (e.g., bracket '[' becomes '1')
@@ -66,10 +84,13 @@ impl ExpCalculator {
 
                     // Detect both explosions (ratio > 10) and drops (ratio < 0.1)
                     if ratio > 10.0 || ratio < 0.1 {
-                        println!("🦀 [Calculator] 🔍 OCR Check: ratio={:.2}x (expected: 0.1x - 10.0x)", ratio);
-                        println!("🦀 [Calculator] ⚠️ OCR ERROR DETECTED: last_exp={}, current_exp={} (ratio={:.2}x)",
-                                last.exp, data.exp, ratio);
-                        println!("🦀 [Calculator] 🚫 Rejecting this reading - keeping previous value");
+                        #[cfg(debug_assertions)]
+                        {
+                            println!("🦀 [Calculator] 🔍 OCR Check: ratio={:.2}x (expected: 0.1x - 10.0x)", ratio);
+                            println!("🦀 [Calculator] ⚠️ OCR ERROR DETECTED: last_exp={}, current_exp={} (ratio={:.2}x)",
+                                    last.exp, data.exp, ratio);
+                            println!("🦀 [Calculator] 🚫 Rejecting this reading - keeping previous value");
+                        }
 
                         // Don't update last_data - keep the good value
                         // Return stats based on last good data
@@ -111,9 +132,12 @@ impl ExpCalculator {
         let percentage_diff = data.percentage - initial.percentage;
         let total_percentage = percentage_diff + self.completed_levels_percentage;
 
-        println!("🦀 [Calculator] Calculation: data.exp={} - initial.exp={} = exp_diff={}", data.exp, initial.exp, exp_diff);
-        println!("🦀 [Calculator] Calculation: total_exp = {} + {} = {}", exp_diff, self.completed_levels_exp, total_exp);
-        println!("🦀 [Calculator] Calculation: percentage_diff={}, total_percentage={}", percentage_diff, total_percentage);
+        #[cfg(debug_assertions)]
+        {
+            println!("🦀 [Calculator] Calculation: data.exp={} - initial.exp={} = exp_diff={}", data.exp, initial.exp, exp_diff);
+            println!("🦀 [Calculator] Calculation: total_exp = {} + {} = {}", exp_diff, self.completed_levels_exp, total_exp);
+            println!("🦀 [Calculator] Calculation: percentage_diff={}, total_percentage={}", percentage_diff, total_percentage);
+        }
         let total_meso = data
             .meso
             .unwrap_or(0)
@@ -160,6 +184,19 @@ impl ExpCalculator {
 
         self.last_data = Some(data);
 
+        // Calculate potion consumption rates
+        let hp_potions_per_minute = if elapsed_seconds > 0 {
+            (self.hp_potions_used as f64 * 60.0) / elapsed_seconds as f64
+        } else {
+            0.0
+        };
+
+        let mp_potions_per_minute = if elapsed_seconds > 0 {
+            (self.mp_potions_used as f64 * 60.0) / elapsed_seconds as f64
+        } else {
+            0.0
+        };
+
         Ok(ExpStats {
             total_exp,
             total_percentage,
@@ -172,7 +209,95 @@ impl ExpCalculator {
             current_level,
             start_level,
             levels_gained,
+            hp_potions_used: self.hp_potions_used,
+            mp_potions_used: self.mp_potions_used,
+            hp_potions_per_minute,
+            mp_potions_per_minute,
         })
+    }
+
+    /// Update with HP/MP potion counts and track consumption
+    /// hp and mp parameters are POTION COUNTS from inventory, not HP/MP values
+    pub fn update_with_hp_mp(&mut self, data: ExpData, hp_potion_count: Option<u32>, mp_potion_count: Option<u32>) -> Result<ExpStats, String> {
+        // OCR error detection threshold: reject if change is too large
+        const MAX_POTION_USAGE_PER_UPDATE: u32 = 10; // Max potions used in single update (OCR error threshold)
+        
+        // Track HP potion usage with OCR validation
+        if let (Some(current_count), Some(last_count)) = (hp_potion_count, self.last_hp) {
+            if current_count < last_count {
+                // Potion count decreased = potions used
+                let used = last_count - current_count;
+                
+                // Validate: reject if decrease is unrealistic (OCR error)
+                if used > MAX_POTION_USAGE_PER_UPDATE {
+                    #[cfg(debug_assertions)]
+                    println!("🦀 [Calculator] ⚠️ HP potion OCR ERROR: {} -> {} (-{}) exceeds threshold ({})",
+                        last_count, current_count, used, MAX_POTION_USAGE_PER_UPDATE);
+                    #[cfg(debug_assertions)]
+                    println!("🦀 [Calculator] 🚫 Rejecting HP potion count - keeping previous value");
+                    
+                    // Don't update last_hp - keep the good value
+                } else {
+                    // Normal usage - update counter
+                    self.hp_potions_used += used;
+                    self.last_hp = hp_potion_count;
+                    
+                    #[cfg(debug_assertions)]
+                    println!("🦀 [Calculator] HP potion used: {} -> {} (-{}), total used: {}",
+                        last_count, current_count, used, self.hp_potions_used);
+                }
+            } else if current_count > last_count {
+                // Potion count increased (shop purchase) - just update the count
+                #[cfg(debug_assertions)]
+                println!("🦀 [Calculator] HP potion purchased: {} -> {} (+{})",
+                    last_count, current_count, current_count - last_count);
+                self.last_hp = hp_potion_count;
+            }
+            // If equal, no change - no update needed
+        } else if hp_potion_count.is_some() {
+            // First HP potion reading
+            self.last_hp = hp_potion_count;
+        }
+
+        // Track MP potion usage with OCR validation
+        if let (Some(current_count), Some(last_count)) = (mp_potion_count, self.last_mp) {
+            if current_count < last_count {
+                // Potion count decreased = potions used
+                let used = last_count - current_count;
+                
+                // Validate: reject if decrease is unrealistic (OCR error)
+                if used > MAX_POTION_USAGE_PER_UPDATE {
+                    #[cfg(debug_assertions)]
+                    println!("🦀 [Calculator] ⚠️ MP potion OCR ERROR: {} -> {} (-{}) exceeds threshold ({})",
+                        last_count, current_count, used, MAX_POTION_USAGE_PER_UPDATE);
+                    #[cfg(debug_assertions)]
+                    println!("🦀 [Calculator] 🚫 Rejecting MP potion count - keeping previous value");
+                    
+                    // Don't update last_mp - keep the good value
+                } else {
+                    // Normal usage - update counter
+                    self.mp_potions_used += used;
+                    self.last_mp = mp_potion_count;
+                    
+                    #[cfg(debug_assertions)]
+                    println!("🦀 [Calculator] MP potion used: {} -> {} (-{}), total used: {}",
+                        last_count, current_count, used, self.mp_potions_used);
+                }
+            } else if current_count > last_count {
+                // Potion count increased (shop purchase) - just update the count
+                #[cfg(debug_assertions)]
+                println!("🦀 [Calculator] MP potion purchased: {} -> {} (+{})",
+                    last_count, current_count, current_count - last_count);
+                self.last_mp = mp_potion_count;
+            }
+            // If equal, no change - no update needed
+        } else if mp_potion_count.is_some() {
+            // First MP potion reading
+            self.last_mp = mp_potion_count;
+        }
+
+        // Call regular update for EXP tracking
+        self.update(data)
     }
 
     /// Reset calculator state
@@ -184,6 +309,12 @@ impl ExpCalculator {
         self.completed_levels_exp = 0;
         self.completed_levels_percentage = 0.0;
         self.paused_duration = Duration::ZERO;
+        self.last_hp = None;
+        self.last_mp = None;
+        self.hp_potions_used = 0;
+        self.mp_potions_used = 0;
+        self.max_hp = None;
+        self.max_mp = None;
     }
 
     #[cfg(test)]

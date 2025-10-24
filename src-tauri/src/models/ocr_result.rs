@@ -21,3 +21,13 @@ pub struct MapResult {
     pub map_name: String,
     pub raw_text: String,
 }
+
+/// Combined OCR result for all 4 operations (parallel execution)
+/// Each field is Option to allow independent failures
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CombinedOcrResult {
+    pub level: Option<LevelResult>,
+    pub exp: Option<ExpResult>,
+    pub hp: Option<u32>,
+    pub mp: Option<u32>,
+}

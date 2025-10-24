@@ -41,11 +41,11 @@ export function Settings() {
         </div>
       </div>
 
-      <div className="settings-actions">
+      {/* <div className="settings-actions">
         <button onClick={resetSettings} className="reset-button">
           기본값으로 재설정
         </button>
-      </div>
+      </div> */}
     </div>
   );
 }

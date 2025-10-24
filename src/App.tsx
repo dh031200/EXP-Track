@@ -12,6 +12,7 @@ import { useSessionStore } from "./stores/sessionStore";
 import { useTimerSettingsStore } from "./stores/timerSettingsStore";
 import { useExpTracker } from "./hooks/useExpTracker";
 import { initScreenCapture } from "./lib/tauri";
+import { checkOcrHealth } from "./lib/ocrCommands";
 import "./App.css";
 
 // Import icons
@@ -28,9 +29,18 @@ function App() {
   const [showRoiModal, setShowRoiModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showTimerSettings, setShowTimerSettings] = useState(false);
+  
+  // Timestamped EXP data for per-interval calculation and history
+  const [expDataPoints, setExpDataPoints] = useState<Array<{
+    timestamp: number;
+    totalExp: number;
+    hpPotions: number;
+    mpPotions: number;
+  }>>([]);
+  const [ocrHealthy, setOcrHealthy] = useState(false);
 
   const backgroundOpacity = useSettingsStore((state) => state.backgroundOpacity);
-  const { levelRoi, expRoi, mapLocationRoi } = useRoiStore(); // mesoRoi commented out
+  const { levelRoi, expRoi } = useRoiStore();
   const {
     state: trackingState,
     elapsedSeconds,
@@ -48,13 +58,13 @@ function App() {
     updateSessionDuration,
   } = useSessionStore();
 
-  const { selectedAverageInterval } = useTimerSettingsStore();
+  const { selectedAverageInterval, averageCalculationMode } = useTimerSettingsStore();
 
   // EXP Tracker hook
   const expTracker = useExpTracker();
 
   // Check if any ROI is configured
-  const hasAnyRoi = levelRoi !== null || expRoi !== null || mapLocationRoi !== null;
+  const hasAnyRoi = levelRoi !== null || expRoi !== null;
 
   // Initialize screen capture on app start
   useEffect(() => {
@@ -70,6 +80,31 @@ function App() {
     initCapture();
   }, []); // Run only once on mount
 
+  // OCR health check polling - check every 3 seconds until healthy
+  useEffect(() => {
+    const checkHealth = async () => {
+      try {
+        const healthy = await checkOcrHealth();
+        setOcrHealthy(healthy);
+      } catch (error) {
+        console.error('OCR health check failed:', error);
+        setOcrHealthy(false);
+      }
+    };
+
+    // Initial check
+    checkHealth();
+
+    // Poll every 3 seconds if not healthy
+    const interval = setInterval(() => {
+      if (!ocrHealthy) {
+        checkHealth();
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [ocrHealthy]);
+
   // Timer effect - increment every second when tracking
   useEffect(() => {
     if (trackingState === 'tracking') {
@@ -82,6 +117,34 @@ function App() {
     }
   }, [trackingState, incrementTimer, elapsedSeconds, pausedSeconds, updateSessionDuration]);
 
+  // Record EXP data points every minute for per-interval calculation
+  useEffect(() => {
+    if (trackingState === 'tracking' && expTracker.state.stats) {
+      const interval = setInterval(() => {
+        const now = Date.now();
+        const totalExp = expTracker.state.stats?.total_exp || 0;
+        
+        setExpDataPoints(prev => {
+          const hpPotions = expTracker.state.stats?.hp_potions_used || 0;
+          const mpPotions = expTracker.state.stats?.mp_potions_used || 0;
+          const newPoints = [...prev, { timestamp: now, totalExp, hpPotions, mpPotions }];
+          // Keep only last 24 hours of data (for history graphs)
+          const cutoffTime = now - 24 * 60 * 60 * 1000;
+          return newPoints.filter(point => point.timestamp > cutoffTime);
+        });
+      }, 60000); // Every 1 minute
+      
+      return () => clearInterval(interval);
+    }
+  }, [trackingState, expTracker.state.stats]);
+
+  // Reset data points when tracking is reset
+  useEffect(() => {
+    if (trackingState === 'idle') {
+      setExpDataPoints([]);
+    }
+  }, [trackingState]);
+
   // Format elapsed seconds as HH:MM:SS
   const formatTime = (seconds: number): string => {
     const hours = Math.floor(seconds / 3600);
@@ -92,11 +155,12 @@ function App() {
 
   // Calculate average exp for selected interval
   const calculateAverage = (): { label: string; value: string } | null => {
-    if (selectedAverageInterval === 'none' || sessions.length === 0) {
+    if (selectedAverageInterval === 'none' || !expTracker.state.stats) {
       return null;
     }
 
     const intervalMinutes = {
+      '1min': 1,
       '5min': 5,
       '10min': 10,
       '30min': 30,
@@ -104,27 +168,138 @@ function App() {
     }[selectedAverageInterval] || 0;
 
     const intervalLabel = {
+      '1min': '1분',
       '5min': '5분',
       '10min': '10분',
       '30min': '30분',
-      '1hour': '1시간',
+      '1hour': '시간',
     }[selectedAverageInterval] || '';
 
+    const stats = expTracker.state.stats;
     const intervalSeconds = intervalMinutes * 60;
-    const totalExp = sessions.reduce((sum, s) => sum + (s.expGained || 0), 0);
-    const totalDuration = sessions.reduce((sum, s) => sum + s.duration, 0);
 
-    if (totalDuration === 0) {
+    // Use real-time stats from OCR tracker
+    if (!stats || stats.elapsed_seconds === 0) {
       return { label: intervalLabel, value: '0' };
     }
 
-    const expPerSecond = totalExp / totalDuration;
-    const avgExp = Math.floor(expPerSecond * intervalSeconds);
+    // Prediction mode: Use first 1/10 of interval to predict full interval
+    // [예상] 경험치: 기준 시간의 1/10 동안 얻은 경험치로 전체 예측
+    if (averageCalculationMode === 'prediction') {
+      const predictionWindow = intervalSeconds / 10; // 1/10 of interval
+      
+      if (stats.elapsed_seconds < predictionWindow) {
+        // Not enough data yet, show current rate
+        const expPerSecond = stats.total_exp / stats.elapsed_seconds;
+        const avgExp = Math.floor(expPerSecond * intervalSeconds);
+        return { label: `${intervalLabel} (예상)`, value: avgExp.toLocaleString('ko-KR') };
+      }
+      
+      // Use data from prediction window to predict full interval
+      const now = Date.now();
+      const windowStart = now - (predictionWindow * 1000);
+      
+      // Find closest data point to window start
+      const relevantPoints = expDataPoints.filter(p => p.timestamp >= windowStart);
+      
+      if (relevantPoints.length >= 2) {
+        const firstPoint = relevantPoints[0];
+        const lastPoint = relevantPoints[relevantPoints.length - 1];
+        const expGained = lastPoint.totalExp - firstPoint.totalExp;
+        const timeElapsed = (lastPoint.timestamp - firstPoint.timestamp) / 1000;
+        
+        if (timeElapsed > 0) {
+          const expPerSecond = expGained / timeElapsed;
+          const avgExp = Math.floor(expPerSecond * intervalSeconds);
+          return { label: `${intervalLabel} (예상)`, value: avgExp.toLocaleString('ko-KR') };
+        }
+      }
+      
+      // Fallback to current rate if not enough data points
+      const expPerSecond = stats.total_exp / stats.elapsed_seconds;
+      const avgExp = Math.floor(expPerSecond * intervalSeconds);
+      return { label: `${intervalLabel} (예상)`, value: avgExp.toLocaleString('ko-KR') };
+    }
 
-    return { label: intervalLabel, value: avgExp.toLocaleString() };
+    // Per-interval mode: Actual EXP gained in recent N minutes
+    // [분당] 경험치: 최근 N분 동안 실제로 얻은 경험치
+    const now = Date.now();
+    const windowStart = now - (intervalSeconds * 1000);
+    
+    // Filter data points within the interval
+    const relevantPoints = expDataPoints.filter(p => p.timestamp >= windowStart);
+    
+    if (relevantPoints.length >= 2) {
+      const firstPoint = relevantPoints[0];
+      const lastPoint = relevantPoints[relevantPoints.length - 1];
+      const expGained = lastPoint.totalExp - firstPoint.totalExp;
+      
+      return { label: intervalLabel, value: expGained.toLocaleString('ko-KR') };
+    }
+    
+    // Not enough data points, use current average
+    const cappedSeconds = Math.min(stats.elapsed_seconds, intervalSeconds);
+    const expPerSecond = stats.total_exp / stats.elapsed_seconds;
+    const avgExp = Math.floor(expPerSecond * cappedSeconds);
+    return { label: intervalLabel, value: avgExp.toLocaleString('ko-KR') };
   };
 
   const averageData = calculateAverage();
+
+  // Calculate HP/MP potion usage per minute (based on recent interval)
+  const calculatePotionUsage = (): { hpPerMinute: number; mpPerMinute: number } => {
+    const stats = expTracker.state.stats;
+    if (!stats || stats.elapsed_seconds === 0) {
+      return { hpPerMinute: 0, mpPerMinute: 0 };
+    }
+
+    const intervalMinutes = {
+      '1min': 1,
+      '5min': 5,
+      '10min': 10,
+      '30min': 30,
+      '1hour': 60,
+    }[selectedAverageInterval] || 0;
+    const intervalSeconds = intervalMinutes * 60;
+    const now = Date.now();
+    const windowStart = now - (intervalSeconds * 1000);
+
+    // Filter data points within the interval
+    const relevantPoints = expDataPoints.filter(p => p.timestamp >= windowStart);
+
+    if (relevantPoints.length >= 2) {
+      const firstPoint = relevantPoints[0];
+      const lastPoint = relevantPoints[relevantPoints.length - 1];
+      const hpUsed = lastPoint.hpPotions - firstPoint.hpPotions;
+      const mpUsed = lastPoint.mpPotions - firstPoint.mpPotions;
+      const timeElapsed = (lastPoint.timestamp - firstPoint.timestamp) / 1000 / 60; // in minutes
+
+      if (timeElapsed > 0) {
+        return {
+          hpPerMinute: hpUsed / timeElapsed,
+          mpPerMinute: mpUsed / timeElapsed,
+        };
+      }
+    }
+
+    // Not enough data points, use total average
+    const elapsedMinutes = stats.elapsed_seconds / 60;
+    return {
+      hpPerMinute: elapsedMinutes > 0 ? stats.hp_potions_used / elapsedMinutes : 0,
+      mpPerMinute: elapsedMinutes > 0 ? stats.mp_potions_used / elapsedMinutes : 0,
+    };
+  };
+
+  const potionUsage = calculatePotionUsage();
+
+  // Get interval label for display
+  const intervalLabel = {
+    '1min': '1분',
+    '5min': '5분',
+    '10min': '10분',
+    '30min': '30분',
+    '1hour': '시간',
+  }[selectedAverageInterval] || '시간';
 
   const handleSelectingChange = useCallback((selecting: boolean) => {
     setIsSelecting(selecting);
@@ -185,7 +360,7 @@ function App() {
     // Check if window already exists (getByLabel is async in Tauri 2.x)
     const existingWindow = await WebviewWindow.getByLabel('history');
     if (existingWindow) {
-      await existingWindow.focus(); // use focus() instead of setFocus() in Tauri 2.x
+      await existingWindow.setFocus();
       return;
     }
 
@@ -230,7 +405,7 @@ function App() {
       {/* Titlebar with integrated controls */}
       {!isSelecting && (
         <div
-          onMouseDown={handleDragStart}
+          onMouseDown={(e) => e.preventDefault()}
           style={{
             position: 'absolute',
             top: 0,
@@ -244,7 +419,7 @@ function App() {
             borderTopLeftRadius: '12px',
             borderTopRightRadius: '12px',
             borderBottom: '1px solid rgba(0, 0, 0, 0.08)',
-            cursor: 'grab',
+            cursor: 'default',
             userSelect: 'none',
           }}
         >
@@ -335,7 +510,7 @@ function App() {
       <main className="container" style={{
         background: isSelecting ? 'transparent' : 'rgba(255, 255, 255, 0.98)',
         marginTop: isSelecting ? '0' : '44px',
-        padding: isSelecting ? '0' : '16px 16px 30px 16px', /* top right bottom left */
+        padding: isSelecting ? '0' : '8px 16px 30px 16px', /* top right bottom left - reduced top padding */
         height: isSelecting ? '100%' : 'calc(100% - 44px)',
         borderBottomLeftRadius: isSelecting ? '0' : '12px',
         borderBottomRightRadius: isSelecting ? '0' : '12px',
@@ -344,14 +519,15 @@ function App() {
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        justifyContent: 'center',
-        gap: '12px',
+        justifyContent: 'flex-start', /* Align to top instead of center */
+        gap: '2px', /* Minimal gap between sections */
+        paddingTop: '20px', /* Add top padding to push content down from titlebar */
         position: 'relative'
       }}>
         {!isSelecting && !showSettings && (
           <>
             {/* OCR Status Indicator - Top Left of main container */}
-            {(expTracker.state.isTracking || expTracker.state.stats) && (
+            {(
               <div style={{
                 position: 'absolute',
                 top: '12px',
@@ -365,9 +541,7 @@ function App() {
                 zIndex: 10
               }}>
                 <span style={{ fontSize: '10px', lineHeight: 1 }}>
-                  {expTracker.state.ocrStatus === 'success' && '🟢'}
-                  {expTracker.state.ocrStatus === 'warning' && '🟡'}
-                  {expTracker.state.ocrStatus === 'error' && '🔴'}
+                  {ocrHealthy ? '🟢' : '🔴'}
                 </span>
                 <span style={{
                   fontSize: '9px',
@@ -388,7 +562,7 @@ function App() {
               {/* Start/Pause Toggle Button */}
               <button
                 onClick={handleToggleTracking}
-                disabled={!hasAnyRoi}
+                disabled={!hasAnyRoi || !ocrHealthy}
                 style={{
                   width: '64px',
                   height: '64px',
@@ -447,18 +621,16 @@ function App() {
             <div style={{
               width: '100%',
               maxWidth: '400px',
-              marginTop: '10px' /* Reduced from 16px */
+              marginTop: '8px' /* Spacing between timer and cards */
             }}>
               <ExpTrackerDisplay
                 stats={expTracker.state.stats}
-                level={expTracker.state.level}
-                exp={expTracker.state.exp}
-                percentage={expTracker.state.percentage}
-                mapName={expTracker.state.mapName}
                 isTracking={expTracker.state.isTracking}
                 error={expTracker.state.error}
-                ocrStatus={expTracker.state.ocrStatus}
                 averageData={calculateAverage()}
+                calculationMode={averageCalculationMode}
+                intervalLabel={intervalLabel}
+                potionUsage={potionUsage}
               />
             </div>
 

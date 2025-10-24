@@ -28,13 +28,17 @@ base64 = "0.22"
 xcap = "0.7"
 # Image processing
 image = "0.25"
-imageproc = "0.25"
-# OCR
-tesseract = "0.14"
 regex = "1.10"
 # Async synchronization
 parking_lot = "0.12"
+# HTTP client for Python OCR server
+reqwest = { version = "0.12", features = ["json"] }
 
 [dev-dependencies]
 tokio-test = "0.4"
+
+# Development profile with optimizations for ONNX inference performance
+# This makes `tauri dev` run at release-level speed for OCR operations
+[profile.dev]
+opt-level = 3
 

@@ -10,6 +10,8 @@ pub struct ExpSnapshot {
     pub exp: u64,        // Current EXP within level
     pub percentage: f64, // Percentage to next level
     pub meso: Option<u64>,
+    pub hp: Option<u32>, // Current HP
+    pub mp: Option<u32>, // Current MP
 }
 
 impl ExpSnapshot {
@@ -26,6 +28,26 @@ impl ExpSnapshot {
             exp,
             percentage,
             meso,
+            hp: None,
+            mp: None,
+        }
+    }
+
+    /// Create a new snapshot with HP/MP
+    pub fn with_hp_mp(level: u32, exp: u64, percentage: f64, meso: Option<u64>, hp: Option<u32>, mp: Option<u32>) -> Self {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        Self {
+            timestamp,
+            level,
+            exp,
+            percentage,
+            meso,
+            hp,
+            mp,
         }
     }
 
@@ -37,6 +59,8 @@ impl ExpSnapshot {
             exp,
             percentage,
             meso,
+            hp: None,
+            mp: None,
         }
     }
 }
@@ -103,6 +127,11 @@ pub struct ExpStats {
     pub current_level: u32,
     pub start_level: u32,
     pub levels_gained: u32,
+    // Potion consumption tracking
+    pub hp_potions_used: u32,     // Total HP potions consumed
+    pub mp_potions_used: u32,     // Total MP potions consumed
+    pub hp_potions_per_minute: f64, // HP potions consumed per minute
+    pub mp_potions_per_minute: f64, // MP potions consumed per minute
 }
 
 pub struct LevelExpTable {
@@ -183,6 +212,10 @@ mod tests {
             current_level: 126,
             start_level: 126,
             levels_gained: 0,
+            hp_potions_used: 5,
+            mp_potions_used: 3,
+            hp_potions_per_minute: 0.5,
+            mp_potions_per_minute: 0.3,
         };
 
         assert_eq!(stats.total_exp, 1000);
@@ -192,5 +225,7 @@ mod tests {
         assert_eq!(stats.current_level, 126);
         assert_eq!(stats.start_level, 126);
         assert_eq!(stats.levels_gained, 0);
+        assert_eq!(stats.hp_potions_used, 5);
+        assert_eq!(stats.mp_potions_used, 3);
     }
 }

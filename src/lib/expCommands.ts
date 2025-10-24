@@ -26,6 +26,14 @@ export interface ExpStats {
   start_level: number;
   /** Number of levels gained */
   levels_gained: number;
+  /** Total HP potions used */
+  hp_potions_used: number;
+  /** Total MP potions used */
+  mp_potions_used: number;
+  /** HP potions consumed per minute */
+  hp_potions_per_minute: number;
+  /** MP potions consumed per minute */
+  mp_potions_per_minute: number;
 }
 
 /**
@@ -98,8 +106,12 @@ export function formatNumber(num: number): string {
 }
 
 /**
- * Format percentage with 2 decimal places
+ * Format percentage with 2 decimal places, ensuring 2 digits before decimal
+ * e.g., 5.5 -> "05.50%", 12.34 -> "12.34%", 100 -> "100.00%"
  */
 export function formatPercentage(pct: number): string {
-  return pct.toFixed(2) + '%';
+  const rounded = pct.toFixed(2);
+  const parts = rounded.split('.');
+  const intPart = parts[0].padStart(2, '0');
+  return `${intPart}.${parts[1]}%`;
 }

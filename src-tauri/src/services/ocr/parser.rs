@@ -7,23 +7,18 @@ pub struct ExpData {
     pub percentage: f64,
 }
 
-/// Parse level from OCR text
-/// Expected format: "LV. 126" or "LV.126" or "LV 126"
+/// Parse level from OCR text - extracts digits only
+/// Expected format: any text containing digits like "126" or "LV. 126"
 /// Returns the level number (1-300)
 pub fn parse_level(text: &str) -> Result<u32, String> {
-    // Pattern: "LV" + optional dot + optional space + digits
-    let re = Regex::new(r"LV\.?\s*(\d{1,3})").unwrap();
+    // Extract all digits
+    let digits: String = text.chars().filter(|c| c.is_ascii_digit()).collect();
 
-    let captures = re
-        .captures(text.trim())
-        .ok_or_else(|| format!("Could not parse level from: {}", text))?;
+    if digits.is_empty() {
+        return Err(format!("No digits found in: {}", text));
+    }
 
-    let level_str = captures
-        .get(1)
-        .ok_or("No level number found")?
-        .as_str();
-
-    let level: u32 = level_str
+    let level: u32 = digits
         .parse()
         .map_err(|e| format!("Failed to parse level number: {}", e))?;
 
@@ -33,6 +28,36 @@ pub fn parse_level(text: &str) -> Result<u32, String> {
     }
 
     Ok(level)
+}
+
+/// Parse HP from OCR text - extracts digits only
+/// Returns the HP value
+pub fn parse_hp(text: &str) -> Result<u32, String> {
+    // Extract all digits
+    let digits: String = text.chars().filter(|c| c.is_ascii_digit()).collect();
+
+    if digits.is_empty() {
+        return Err(format!("No digits found in: {}", text));
+    }
+
+    digits
+        .parse()
+        .map_err(|e| format!("Failed to parse HP: {}", e))
+}
+
+/// Parse MP from OCR text - extracts digits only
+/// Returns the MP value
+pub fn parse_mp(text: &str) -> Result<u32, String> {
+    // Extract all digits
+    let digits: String = text.chars().filter(|c| c.is_ascii_digit()).collect();
+
+    if digits.is_empty() {
+        return Err(format!("No digits found in: {}", text));
+    }
+
+    digits
+        .parse()
+        .map_err(|e| format!("Failed to parse MP: {}", e))
 }
 
 /// Parse EXP from OCR text
@@ -166,67 +191,115 @@ mod tests {
     use super::*;
 
     // ============================================================
-    // Level Parser Tests (🔴 RED Phase)
+    // Level Parser Tests (숫자만 추출)
     // ============================================================
 
     #[test]
-    fn test_parse_level_valid_with_space() {
+    fn test_parse_level_with_prefix() {
         let result = parse_level("LV. 126");
         assert!(result.is_ok(), "Should parse 'LV. 126'");
         assert_eq!(result.unwrap(), 126);
     }
 
     #[test]
-    fn test_parse_level_valid_no_space() {
-        let result = parse_level("LV.45");
-        assert!(result.is_ok(), "Should parse 'LV.45'");
+    fn test_parse_level_digits_only() {
+        let result = parse_level("126");
+        assert!(result.is_ok(), "Should parse digits only");
+        assert_eq!(result.unwrap(), 126);
+    }
+
+    #[test]
+    fn test_parse_level_with_text() {
+        let result = parse_level("Level 45");
+        assert!(result.is_ok(), "Should extract digits from text");
         assert_eq!(result.unwrap(), 45);
     }
 
     #[test]
-    fn test_parse_level_valid_no_dot() {
-        let result = parse_level("LV 1");
-        assert!(result.is_ok(), "Should parse 'LV 1'");
-        assert_eq!(result.unwrap(), 1);
-    }
-
-    #[test]
-    fn test_parse_level_valid_max() {
-        let result = parse_level("LV. 300");
+    fn test_parse_level_max() {
+        let result = parse_level("300");
         assert!(result.is_ok(), "Should parse level 300");
         assert_eq!(result.unwrap(), 300);
     }
 
     #[test]
-    fn test_parse_level_invalid_no_prefix() {
-        let result = parse_level("126");
-        assert!(result.is_err(), "Should fail without 'LV' prefix");
+    fn test_parse_level_invalid_no_digits() {
+        let result = parse_level("LV");
+        assert!(result.is_err(), "Should fail without digits");
     }
 
     #[test]
-    fn test_parse_level_invalid_out_of_range_zero() {
-        let result = parse_level("LV. 0");
+    fn test_parse_level_invalid_zero() {
+        let result = parse_level("0");
         assert!(result.is_err(), "Should fail for level 0");
     }
 
     #[test]
-    fn test_parse_level_invalid_out_of_range_high() {
-        let result = parse_level("LV. 301");
+    fn test_parse_level_invalid_out_of_range() {
+        let result = parse_level("301");
         assert!(result.is_err(), "Should fail for level > 300");
     }
 
+    // ============================================================
+    // HP Parser Tests (숫자만 추출)
+    // ============================================================
+
     #[test]
-    fn test_parse_level_with_trailing_whitespace() {
-        let result = parse_level("LV. 126 ");
-        assert!(result.is_ok(), "Should handle trailing whitespace");
-        assert_eq!(result.unwrap(), 126);
+    fn test_parse_hp_digits_only() {
+        let result = parse_hp("930");
+        assert!(result.is_ok(), "Should parse digits only");
+        assert_eq!(result.unwrap(), 930);
     }
 
     #[test]
-    fn test_parse_level_with_leading_whitespace() {
-        let result = parse_level(" LV. 126");
-        assert!(result.is_ok(), "Should handle leading whitespace");
-        assert_eq!(result.unwrap(), 126);
+    fn test_parse_hp_with_text() {
+        let result = parse_hp("HP: 930");
+        assert!(result.is_ok(), "Should extract digits from text");
+        assert_eq!(result.unwrap(), 930);
+    }
+
+    #[test]
+    fn test_parse_hp_large_value() {
+        let result = parse_hp("15000");
+        assert!(result.is_ok(), "Should parse large HP values");
+        assert_eq!(result.unwrap(), 15000);
+    }
+
+    #[test]
+    fn test_parse_hp_invalid_no_digits() {
+        let result = parse_hp("HP");
+        assert!(result.is_err(), "Should fail without digits");
+    }
+
+    // ============================================================
+    // MP Parser Tests (숫자만 추출)
+    // ============================================================
+
+    #[test]
+    fn test_parse_mp_digits_only() {
+        let result = parse_mp("460");
+        assert!(result.is_ok(), "Should parse digits only");
+        assert_eq!(result.unwrap(), 460);
+    }
+
+    #[test]
+    fn test_parse_mp_with_text() {
+        let result = parse_mp("MP: 460");
+        assert!(result.is_ok(), "Should extract digits from text");
+        assert_eq!(result.unwrap(), 460);
+    }
+
+    #[test]
+    fn test_parse_mp_large_value() {
+        let result = parse_mp("12000");
+        assert!(result.is_ok(), "Should parse large MP values");
+        assert_eq!(result.unwrap(), 12000);
+    }
+
+    #[test]
+    fn test_parse_mp_invalid_no_digits() {
+        let result = parse_mp("MP");
+        assert!(result.is_err(), "Should fail without digits");
     }
 
     // ============================================================

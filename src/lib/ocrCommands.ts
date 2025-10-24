@@ -60,6 +60,37 @@ export async function recognizeMap(imageBase64: string): Promise<MapResult> {
 }
 
 /**
+ * Recognize HP value from image
+ * @param imageBase64 Base64-encoded PNG image
+ * @returns HP value
+ */
+export async function recognizeHp(imageBase64: string): Promise<number> {
+  return await invoke<number>('recognize_hp', { imageBase64 });
+}
+
+/**
+ * Recognize MP value from image
+ * @param imageBase64 Base64-encoded PNG image
+ * @returns MP value
+ */
+export async function recognizeMp(imageBase64: string): Promise<number> {
+  return await invoke<number>('recognize_mp', { imageBase64 });
+}
+
+/**
+ * Check OCR server health status
+ * @returns True if OCR server is healthy, false otherwise
+ */
+export async function checkOcrHealth(): Promise<boolean> {
+  try {
+    return await invoke<boolean>('check_ocr_health');
+  } catch (error) {
+    console.error('Health check failed:', error);
+    return false;
+  }
+}
+
+/**
  * Helper: Convert image data URL to base64 string
  * @param dataUrl Image data URL (e.g., from canvas.toDataURL())
  * @returns Base64-encoded image data without prefix
