@@ -5,6 +5,9 @@ Provides REST API for OCR operations
 """
 import base64
 import io
+import os
+import sys
+from pathlib import Path
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor
 import asyncio
@@ -39,17 +42,42 @@ async def startup_event():
     """Initialize OCR engine on startup"""
     global ocr_engine, executor
     print("🚀 Initializing RapidOCR engine...")
-    # Initialize RapidOCR engine with ONNX Runtime + Korean + Mobile + PP-OCRv5
+
+    # Determine models directory path (works for both dev and bundled app)
+    if getattr(sys, 'frozen', False):
+        # Running as PyInstaller bundle
+        base_path = Path(sys._MEIPASS)
+    else:
+        # Running as script
+        base_path = Path(__file__).parent
+
+    models_dir = base_path / "rapidocr" / "models"
+
+    # Model file paths
+    det_model_path = models_dir / "ch_PP-OCRv5_mobile_det.onnx"
+    cls_model_path = models_dir / "ch_ppocr_mobile_v2.0_cls_infer.onnx"
+    rec_model_path = models_dir / "korean_PP-OCRv5_rec_mobile_infer.onnx"
+
+    print(f"📁 Models directory: {models_dir}")
+    print(f"   Det model: {det_model_path.exists()}")
+    print(f"   Cls model: {cls_model_path.exists()}")
+    print(f"   Rec model: {rec_model_path.exists()}")
+
+    # Initialize RapidOCR engine with explicit model paths
     ocr_engine = RapidOCR(
         params={
             "Det.engine_type": EngineType.ONNXRUNTIME,
             "Det.lang_type": LangDet.CH,
             "Det.model_type": ModelType.MOBILE,
             "Det.ocr_version": OCRVersion.PPOCRV5,
+            "Det.model_path": str(det_model_path),
             "Rec.engine_type": EngineType.ONNXRUNTIME,
             "Rec.lang_type": LangRec.KOREAN,
             "Rec.model_type": ModelType.MOBILE,
             "Rec.ocr_version": OCRVersion.PPOCRV5,
+            "Rec.model_path": str(rec_model_path),
+            "Cls.engine_type": EngineType.ONNXRUNTIME,
+            "Cls.model_path": str(cls_model_path),
         }
     )
     # Create thread pool with 4 workers for parallel OCR

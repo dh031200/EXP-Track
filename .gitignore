@@ -53,6 +53,9 @@ Thumbs.db
 devdocs/
 icons/
 legacy/
+.serena/
+.venv/
+scripts/
 
 # Python
 __pycache__/

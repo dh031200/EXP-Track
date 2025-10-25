@@ -13,6 +13,7 @@
     "icon:generate": "tauri icon src-tauri/icons/EXP_Tracker.png",
     "prebuild": "npm run icon:generate",
     "build:notarize": "npm run build && npm run tauri:build:notarize",
+    "sign:notarize": "bash scripts/sign_and_notarize.sh",
     "clean": "rm -rf dist node_modules/.vite src-tauri/target",
     "clean:build": "npm run clean && npm install && npm run tauri build",
     "test": "vitest",
