@@ -5,21 +5,11 @@ pub struct ExpCalculator {
     level_table: LevelExpTable,
     initial_data: Option<ExpData>,
     last_data: Option<ExpData>,
-    start_time: Option<Instant>,
+    pub start_time: Option<Instant>,
     start_level: u32,  // Original starting level (never changes after session start)
-    completed_levels_exp: u64,
-    completed_levels_percentage: f64,
+    pub completed_levels_exp: u64,
+    pub completed_levels_percentage: f64,
     paused_duration: Duration,
-    // HP/MP tracking
-    last_hp: Option<u32>,
-    last_mp: Option<u32>,
-    hp_potions_used: u32,
-    mp_potions_used: u32,
-    max_hp: Option<u32>,  // Maximum HP for detecting recovery
-    max_mp: Option<u32>,  // Maximum MP for detecting recovery
-    // Pending increase validation (value, consecutive_count)
-    pending_hp_increase: Option<(u32, u8)>,
-    pending_mp_increase: Option<(u32, u8)>,
 }
 
 impl ExpCalculator {
@@ -36,14 +26,6 @@ impl ExpCalculator {
             completed_levels_exp: 0,
             completed_levels_percentage: 0.0,
             paused_duration: Duration::ZERO,
-            last_hp: None,
-            last_mp: None,
-            hp_potions_used: 0,
-            mp_potions_used: 0,
-            max_hp: None,
-            max_mp: None,
-            pending_hp_increase: None,
-            pending_mp_increase: None,
         })
     }
 
@@ -189,19 +171,6 @@ impl ExpCalculator {
 
         self.last_data = Some(data);
 
-        // Calculate potion consumption rates
-        let hp_potions_per_minute = if elapsed_seconds > 0 {
-            (self.hp_potions_used as f64 * 60.0) / elapsed_seconds as f64
-        } else {
-            0.0
-        };
-
-        let mp_potions_per_minute = if elapsed_seconds > 0 {
-            (self.mp_potions_used as f64 * 60.0) / elapsed_seconds as f64
-        } else {
-            0.0
-        };
-
         Ok(ExpStats {
             total_exp,
             total_percentage,
@@ -214,153 +183,12 @@ impl ExpCalculator {
             current_level,
             start_level,
             levels_gained,
-            hp_potions_used: self.hp_potions_used,
-            mp_potions_used: self.mp_potions_used,
-            hp_potions_per_minute,
-            mp_potions_per_minute,
+            // HP/MP potion stats are now managed by separate calculators
+            hp_potions_used: 0,
+            mp_potions_used: 0,
+            hp_potions_per_minute: 0.0,
+            mp_potions_per_minute: 0.0,
         })
-    }
-
-    /// Update with HP/MP potion counts and track consumption
-    /// hp and mp parameters are POTION COUNTS from inventory, not HP/MP values
-    pub fn update_with_hp_mp(&mut self, data: ExpData, hp_potion_count: Option<u32>, mp_potion_count: Option<u32>) -> Result<ExpStats, String> {
-        // OCR error detection threshold: reject if change is too large
-        const MAX_POTION_USAGE_PER_UPDATE: u32 = 10; // Max potions used in single update (OCR error threshold)
-        
-        // Track HP potion usage with OCR validation
-        if let (Some(current_count), Some(last_count)) = (hp_potion_count, self.last_hp) {
-            if current_count < last_count {
-                // Potion count decreased = potions used
-                let used = last_count - current_count;
-                
-                // Validate: reject if decrease is unrealistic (OCR error)
-                if used > MAX_POTION_USAGE_PER_UPDATE {
-                    #[cfg(debug_assertions)]
-                    println!("🦀 [Calculator] ⚠️ HP potion OCR ERROR: {} -> {} (-{}) exceeds threshold ({})",
-                        last_count, current_count, used, MAX_POTION_USAGE_PER_UPDATE);
-                    #[cfg(debug_assertions)]
-                    println!("🦀 [Calculator] 🚫 Rejecting HP potion count - keeping previous value");
-                    
-                    // Don't update last_hp - keep the good value
-                } else {
-                    // Normal usage - update counter
-                    self.hp_potions_used += used;
-                    self.last_hp = hp_potion_count;
-                    
-                    #[cfg(debug_assertions)]
-                    println!("🦀 [Calculator] HP potion used: {} -> {} (-{}), total used: {}",
-                        last_count, current_count, used, self.hp_potions_used);
-                }
-            } else if current_count > last_count {
-                // Potion count increased (shop purchase) - validate 5 times before accepting
-                match self.pending_hp_increase {
-                    Some((pending_val, count)) if pending_val == current_count => {
-                        // Same increased value - increment count
-                        if count + 1 >= 5 {
-                            // 5 consecutive verifications - accept as real increase
-                            #[cfg(debug_assertions)]
-                            println!("🦀 [Calculator] ✅ HP potion increase verified (5x): {} -> {} (+{})",
-                                last_count, current_count, current_count - last_count);
-                            self.last_hp = hp_potion_count;
-                            self.pending_hp_increase = None;
-                        } else {
-                            // Continue verification
-                            self.pending_hp_increase = Some((pending_val, count + 1));
-                            #[cfg(debug_assertions)]
-                            println!("🦀 [Calculator] 🔄 HP potion increase verification {}/5: {} -> {}",
-                                count + 1, last_count, current_count);
-                        }
-                    }
-                    _ => {
-                        // New increase value or different value - start verification
-                        self.pending_hp_increase = Some((current_count, 1));
-                        #[cfg(debug_assertions)]
-                        println!("🦀 [Calculator] 🔄 HP potion increase detected, starting verification 1/5: {} -> {}",
-                            last_count, current_count);
-                    }
-                }
-            } else {
-                // current_count == last_count - reset pending if exists
-                if self.pending_hp_increase.is_some() {
-                    #[cfg(debug_assertions)]
-                    println!("🦀 [Calculator] 🚫 HP potion increase verification cancelled (value reverted)");
-                    self.pending_hp_increase = None;
-                }
-            }
-            // If equal, no change - no update needed
-        } else if hp_potion_count.is_some() {
-            // First HP potion reading
-            self.last_hp = hp_potion_count;
-        }
-
-        // Track MP potion usage with OCR validation
-        if let (Some(current_count), Some(last_count)) = (mp_potion_count, self.last_mp) {
-            if current_count < last_count {
-                // Potion count decreased = potions used
-                let used = last_count - current_count;
-                
-                // Validate: reject if decrease is unrealistic (OCR error)
-                if used > MAX_POTION_USAGE_PER_UPDATE {
-                    #[cfg(debug_assertions)]
-                    println!("🦀 [Calculator] ⚠️ MP potion OCR ERROR: {} -> {} (-{}) exceeds threshold ({})",
-                        last_count, current_count, used, MAX_POTION_USAGE_PER_UPDATE);
-                    #[cfg(debug_assertions)]
-                    println!("🦀 [Calculator] 🚫 Rejecting MP potion count - keeping previous value");
-                    
-                    // Don't update last_mp - keep the good value
-                } else {
-                    // Normal usage - update counter
-                    self.mp_potions_used += used;
-                    self.last_mp = mp_potion_count;
-                    
-                    #[cfg(debug_assertions)]
-                    println!("🦀 [Calculator] MP potion used: {} -> {} (-{}), total used: {}",
-                        last_count, current_count, used, self.mp_potions_used);
-                }
-            } else if current_count > last_count {
-                // Potion count increased (shop purchase) - validate 5 times before accepting
-                match self.pending_mp_increase {
-                    Some((pending_val, count)) if pending_val == current_count => {
-                        // Same increased value - increment count
-                        if count + 1 >= 5 {
-                            // 5 consecutive verifications - accept as real increase
-                            #[cfg(debug_assertions)]
-                            println!("🦀 [Calculator] ✅ MP potion increase verified (5x): {} -> {} (+{})",
-                                last_count, current_count, current_count - last_count);
-                            self.last_mp = mp_potion_count;
-                            self.pending_mp_increase = None;
-                        } else {
-                            // Continue verification
-                            self.pending_mp_increase = Some((pending_val, count + 1));
-                            #[cfg(debug_assertions)]
-                            println!("🦀 [Calculator] 🔄 MP potion increase verification {}/5: {} -> {}",
-                                count + 1, last_count, current_count);
-                        }
-                    }
-                    _ => {
-                        // New increase value or different value - start verification
-                        self.pending_mp_increase = Some((current_count, 1));
-                        #[cfg(debug_assertions)]
-                        println!("🦀 [Calculator] 🔄 MP potion increase detected, starting verification 1/5: {} -> {}",
-                            last_count, current_count);
-                    }
-                }
-            } else {
-                // current_count == last_count - reset pending if exists
-                if self.pending_mp_increase.is_some() {
-                    #[cfg(debug_assertions)]
-                    println!("🦀 [Calculator] 🚫 MP potion increase verification cancelled (value reverted)");
-                    self.pending_mp_increase = None;
-                }
-            }
-            // If equal, no change - no update needed
-        } else if mp_potion_count.is_some() {
-            // First MP potion reading
-            self.last_mp = mp_potion_count;
-        }
-
-        // Call regular update for EXP tracking
-        self.update(data)
     }
 
     /// Reset calculator state
@@ -372,14 +200,6 @@ impl ExpCalculator {
         self.completed_levels_exp = 0;
         self.completed_levels_percentage = 0.0;
         self.paused_duration = Duration::ZERO;
-        self.last_hp = None;
-        self.last_mp = None;
-        self.hp_potions_used = 0;
-        self.mp_potions_used = 0;
-        self.max_hp = None;
-        self.max_mp = None;
-        self.pending_hp_increase = None;
-        self.pending_mp_increase = None;
     }
 
     #[cfg(test)]

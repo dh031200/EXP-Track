@@ -2,10 +2,13 @@ use crate::commands::ocr::OcrService;
 use crate::models::exp_data::ExpData;
 use crate::models::roi::Roi;
 use crate::services::exp_calculator::ExpCalculator;
+use crate::services::hp_potion_calculator::HpPotionCalculator;
+use crate::services::mp_potion_calculator::MpPotionCalculator;
 use crate::services::screen_capture::ScreenCapture;
 use serde::Serialize;
 use std::sync::Arc;
 use std::time::Duration;
+use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
 use tokio::time::sleep;
 
@@ -15,8 +18,8 @@ pub struct TrackingStats {
     pub level: Option<i32>,
     pub exp: Option<i64>,
     pub percentage: Option<f64>,
-    pub hp: Option<i32>,
-    pub mp: Option<i32>,
+    pub hp_potion_count: Option<i32>,
+    pub mp_potion_count: Option<i32>,
     pub total_exp: i64,
     pub total_percentage: f64,
     pub elapsed_seconds: i64,
@@ -35,9 +38,12 @@ struct TrackerState {
     level: Option<u32>,
     exp: Option<u64>,
     percentage: Option<f64>,
-    hp: Option<u32>,
-    mp: Option<u32>,
+    hp_potion_count: Option<u32>,
+    mp_potion_count: Option<u32>,
+    // Independent calculators - each tracks its own data
     exp_calculator: ExpCalculator,
+    hp_calculator: HpPotionCalculator,
+    mp_calculator: MpPotionCalculator,
     is_tracking: bool,
     error: Option<String>,
     // Level stability tracking
@@ -45,7 +51,7 @@ struct TrackerState {
     level_match_count: u32,
     // Session started flag
     session_started: bool,
-    // Latest stats from calculator
+    // Latest stats cache - each calculator updates its own fields
     latest_stats: TrackingStats,
 }
 
@@ -55,9 +61,11 @@ impl TrackerState {
             level: None,
             exp: None,
             percentage: None,
-            hp: None,
-            mp: None,
+            hp_potion_count: None,
+            mp_potion_count: None,
             exp_calculator: ExpCalculator::new()?,
+            hp_calculator: HpPotionCalculator::new(),
+            mp_calculator: MpPotionCalculator::new(),
             is_tracking: false,
             error: None,
             prev_level: None,
@@ -67,8 +75,8 @@ impl TrackerState {
                 level: None,
                 exp: None,
                 percentage: None,
-                hp: None,
-                mp: None,
+                hp_potion_count: None,
+                mp_potion_count: None,
                 total_exp: 0,
                 total_percentage: 0.0,
                 elapsed_seconds: 0,
@@ -126,24 +134,17 @@ impl TrackerState {
                 #[cfg(debug_assertions)]
                 println!("✅ Tracking session started: level={}, exp={}, percentage={}", level, exp, percentage);
             } else {
-                // Update session with HP/MP tracking
-                let result = if let (Some(hp), Some(mp)) = (self.hp, self.mp) {
-                    self.exp_calculator.update_with_hp_mp(data, Some(hp), Some(mp))
-                } else {
-                    self.exp_calculator.update(data)
-                };
+                // Update session with EXP tracking - ORIGINAL WORKING MECHANISM
+                let result = self.exp_calculator.update(data);
 
                 match result {
                     Ok(stats) => {
+                        // Cache ONLY EXP stats - HP/MP have their own calculators now
                         self.latest_stats.total_exp = stats.total_exp as i64;
                         self.latest_stats.total_percentage = stats.total_percentage;
                         self.latest_stats.elapsed_seconds = stats.elapsed_seconds as i64;
                         self.latest_stats.exp_per_hour = stats.exp_per_hour as i64;
                         self.latest_stats.percentage_per_hour = stats.percentage_per_hour;
-                        self.latest_stats.hp_potions_used = stats.hp_potions_used as i32;
-                        self.latest_stats.mp_potions_used = stats.mp_potions_used as i32;
-                        self.latest_stats.hp_potions_per_minute = stats.hp_potions_per_minute;
-                        self.latest_stats.mp_potions_per_minute = stats.mp_potions_per_minute;
                         self.error = None;
                     }
                     Err(e) => {
@@ -157,12 +158,15 @@ impl TrackerState {
     }
 
     fn to_stats(&self) -> TrackingStats {
+        // ORIGINAL EXP MECHANISM: Read from cached latest_stats
+        // All trackers use the same mechanism now
         TrackingStats {
             level: self.level.map(|l| l as i32),
             exp: self.exp.map(|e| e as i64),
             percentage: self.percentage,
-            hp: self.hp.map(|h| h as i32),
-            mp: self.mp.map(|m| m as i32),
+            hp_potion_count: self.hp_potion_count.map(|h| h as i32),
+            mp_potion_count: self.mp_potion_count.map(|m| m as i32),
+            // Read from cache (same as original EXP mechanism)
             total_exp: self.latest_stats.total_exp,
             total_percentage: self.latest_stats.total_percentage,
             elapsed_seconds: self.latest_stats.elapsed_seconds,
@@ -178,19 +182,43 @@ impl TrackerState {
     }
 }
 
+/// Event payloads for Frontend updates
+#[derive(Clone, Serialize)]
+struct LevelUpdate {
+    level: u32,
+}
+
+#[derive(Clone, Serialize)]
+struct ExpUpdate {
+    exp: u64,
+    percentage: f64,
+}
+
+#[derive(Clone, Serialize)]
+struct HpPotionUpdate {
+    hp_potion_count: u32,
+}
+
+#[derive(Clone, Serialize)]
+struct MpPotionUpdate {
+    mp_potion_count: u32,
+}
+
 /// Global OCR Tracker instance
 pub struct OcrTracker {
     state: Arc<Mutex<TrackerState>>,
     stop_signal: Arc<Mutex<bool>>,
     screen_capture: Arc<ScreenCapture>,
+    app: AppHandle,
 }
 
 impl OcrTracker {
-    pub fn new() -> Result<Self, String> {
+    pub fn new(app: AppHandle) -> Result<Self, String> {
         Ok(Self {
             state: Arc::new(Mutex::new(TrackerState::new()?)),
             stop_signal: Arc::new(Mutex::new(false)),
             screen_capture: Arc::new(ScreenCapture::new()?),
+            app,
         })
     }
 
@@ -202,20 +230,29 @@ impl OcrTracker {
         hp_roi: Roi,
         mp_roi: Roi,
     ) -> Result<(), String> {
+        // Check if already tracking - prevent reinitialization
+        let state = self.state.lock().await;
+        if state.is_tracking {
+            #[cfg(debug_assertions)]
+            println!("⚠️  Already tracking, ignoring restart request");
+            return Ok(());
+        }
+        drop(state);
+
         // Reset stop signal
         *self.stop_signal.lock().await = false;
 
-        // Reset state
+        // Reset state (only if not tracking)
         let mut state = self.state.lock().await;
         *state = TrackerState::new()?;
         state.is_tracking = true;
         drop(state);
 
         // Spawn 4 independent OCR tasks
-        self.spawn_level_loop(level_roi);
-        self.spawn_exp_loop(exp_roi);
-        self.spawn_hp_loop(hp_roi);
-        self.spawn_mp_loop(mp_roi);
+        self.spawn_level_loop(level_roi, self.app.clone());
+        self.spawn_exp_loop(exp_roi, self.app.clone());
+        self.spawn_hp_potion_loop(hp_roi, self.app.clone());
+        self.spawn_mp_potion_loop(mp_roi, self.app.clone());
 
         #[cfg(debug_assertions)]
         println!("🚀 OCR Tracker started with 4 parallel tasks");
@@ -247,8 +284,8 @@ impl OcrTracker {
         Ok(())
     }
 
-    // Independent Level OCR loop with dedicated model instance
-    fn spawn_level_loop(&self, roi: Roi) {
+    // Independent Level OCR loop with dedicated model instance + image caching
+    fn spawn_level_loop(&self, roi: Roi, app: AppHandle) {
         let state = Arc::clone(&self.state);
         let stop_signal = Arc::clone(&self.stop_signal);
         let screen_capture = Arc::clone(&self.screen_capture);
@@ -269,25 +306,53 @@ impl OcrTracker {
             #[cfg(debug_assertions)]
             println!("✅ LEVEL OCR: Model loaded successfully");
 
+            // Image cache for duplicate detection
+            let mut last_image_bytes: Option<Vec<u8>> = None;
+
             while !*stop_signal.lock().await {
                 let start = std::time::Instant::now();
 
                 match screen_capture.capture_region(&roi) {
-                    Ok(image) => match ocr_service.recognize_level(&image).await {
-                        Ok(result) => {
-                            let mut state = state.lock().await;
-                            state.update_level(result.level);
-                            #[cfg(debug_assertions)]
-                            {
-                                let elapsed = start.elapsed().as_millis();
-                                println!("✅ LEVEL OCR: {} ({}ms)", result.level, elapsed);
+                    Ok(image) => {
+                        // Convert image to raw bytes for comparison
+                        let current_bytes = image.as_bytes().to_vec();
+
+                        // Check if image is identical to last capture
+                        if let Some(ref last_bytes) = last_image_bytes {
+                            if current_bytes == *last_bytes {
+                                #[cfg(debug_assertions)]
+                                println!("⏭️  LEVEL: Skipped (identical image)");
+                                sleep(Duration::from_millis(500)).await;
+                                continue;
                             }
                         }
-                        Err(e) => {
-                            #[cfg(debug_assertions)]
-                            eprintln!("❌ LEVEL OCR failed: {}", e);
+
+                        // Image changed - run OCR
+                        match ocr_service.recognize_level(&image).await {
+                            Ok(result) => {
+                                let mut state = state.lock().await;
+                                state.update_level(result.level);
+
+                                // Emit event to Frontend if level is confirmed (stable)
+                                if let Some(level) = state.level {
+                                    app.emit("ocr:level-update", LevelUpdate { level }).ok();
+                                }
+
+                                #[cfg(debug_assertions)]
+                                {
+                                    let elapsed = start.elapsed().as_millis();
+                                    println!("✅ LEVEL OCR: {} ({}ms)", result.level, elapsed);
+                                }
+                            }
+                            Err(e) => {
+                                #[cfg(debug_assertions)]
+                                eprintln!("❌ LEVEL OCR failed: {}", e);
+                            }
                         }
-                    },
+
+                        // Update cache
+                        last_image_bytes = Some(current_bytes);
+                    }
                     Err(e) => {
                         #[cfg(debug_assertions)]
                         eprintln!("❌ LEVEL capture failed: {}", e);
@@ -302,8 +367,8 @@ impl OcrTracker {
         });
     }
 
-    // Independent EXP OCR loop with dedicated model instance
-    fn spawn_exp_loop(&self, roi: Roi) {
+    // Independent EXP OCR loop with dedicated model instance + image caching
+    fn spawn_exp_loop(&self, roi: Roi, app: AppHandle) {
         let state = Arc::clone(&self.state);
         let stop_signal = Arc::clone(&self.stop_signal);
         let screen_capture = Arc::clone(&self.screen_capture);
@@ -324,29 +389,57 @@ impl OcrTracker {
             #[cfg(debug_assertions)]
             println!("✅ EXP OCR: Model loaded successfully");
 
+            // Image cache for duplicate detection
+            let mut last_image_bytes: Option<Vec<u8>> = None;
+
             while !*stop_signal.lock().await {
                 let start = std::time::Instant::now();
 
                 match screen_capture.capture_region(&roi) {
-                    Ok(image) => match ocr_service.recognize_exp(&image).await {
-                        Ok(result) => {
-                            let mut state_guard = state.lock().await;
-                            state_guard.update_exp_data(result.absolute, result.percentage);
+                    Ok(image) => {
+                        // Convert image to raw bytes for comparison
+                        let current_bytes = image.as_bytes().to_vec();
 
-                            #[cfg(debug_assertions)]
-                            {
-                                let elapsed = start.elapsed().as_millis();
-                                println!(
-                                    "✅ EXP OCR: {} [{}%] ({}ms)",
-                                    result.absolute, result.percentage, elapsed
-                                );
+                        // Check if image is identical to last capture
+                        if let Some(ref last_bytes) = last_image_bytes {
+                            if current_bytes == *last_bytes {
+                                #[cfg(debug_assertions)]
+                                println!("⏭️  EXP: Skipped (identical image)");
+                                sleep(Duration::from_millis(500)).await;
+                                continue;
                             }
                         }
-                        Err(e) => {
-                            #[cfg(debug_assertions)]
-                            eprintln!("❌ EXP OCR failed: {}", e);
+
+                        // Image changed - run OCR
+                        match ocr_service.recognize_exp(&image).await {
+                            Ok(result) => {
+                                let mut state_guard = state.lock().await;
+                                state_guard.update_exp_data(result.absolute, result.percentage);
+
+                                // Emit event to Frontend immediately
+                                app.emit("ocr:exp-update", ExpUpdate {
+                                    exp: result.absolute,
+                                    percentage: result.percentage
+                                }).ok();
+
+                                #[cfg(debug_assertions)]
+                                {
+                                    let elapsed = start.elapsed().as_millis();
+                                    println!(
+                                        "✅ EXP OCR: {} [{}%] ({}ms)",
+                                        result.absolute, result.percentage, elapsed
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                #[cfg(debug_assertions)]
+                                eprintln!("❌ EXP OCR failed: {}", e);
+                            }
                         }
-                    },
+
+                        // Update cache
+                        last_image_bytes = Some(current_bytes);
+                    }
                     Err(e) => {
                         #[cfg(debug_assertions)]
                         eprintln!("❌ EXP capture failed: {}", e);
@@ -361,50 +454,87 @@ impl OcrTracker {
         });
     }
 
-    // Independent HP OCR loop with dedicated model instance
-    fn spawn_hp_loop(&self, roi: Roi) {
+    // Independent HP Potion OCR loop with dedicated model instance + image caching
+    fn spawn_hp_potion_loop(&self, roi: Roi, app: AppHandle) {
         let state = Arc::clone(&self.state);
         let stop_signal = Arc::clone(&self.stop_signal);
         let screen_capture = Arc::clone(&self.screen_capture);
 
         tokio::spawn(async move {
             #[cfg(debug_assertions)]
-            println!("🚀 HP OCR task started - loading dedicated model instance");
+            println!("🚀 HP Potion OCR task started - loading dedicated model instance");
 
             // Create dedicated OCR service instance for this task
             let ocr_service = match OcrService::new() {
                 Ok(service) => service,
                 Err(e) => {
-                    eprintln!("❌ HP OCR: Failed to initialize OCR service: {}", e);
+                    eprintln!("❌ HP Potion OCR: Failed to initialize OCR service: {}", e);
                     return;
                 }
             };
 
             #[cfg(debug_assertions)]
-            println!("✅ HP OCR: Model loaded successfully");
+            println!("✅ HP Potion OCR: Model loaded successfully");
+
+            // Image cache for duplicate detection
+            let mut last_image_bytes: Option<Vec<u8>> = None;
 
             while !*stop_signal.lock().await {
                 let start = std::time::Instant::now();
 
                 match screen_capture.capture_region(&roi) {
-                    Ok(image) => match ocr_service.recognize_hp(&image).await {
-                        Ok(hp) => {
-                            let mut state = state.lock().await;
-                            state.hp = Some(hp);
-                            #[cfg(debug_assertions)]
-                            {
-                                let elapsed = start.elapsed().as_millis();
-                                println!("✅ HP OCR: {} ({}ms)", hp, elapsed);
+                    Ok(image) => {
+                        // Convert image to raw bytes for comparison
+                        let current_bytes = image.as_bytes().to_vec();
+
+                        // Check if image is identical to last capture
+                        if let Some(ref last_bytes) = last_image_bytes {
+                            if current_bytes == *last_bytes {
+                                #[cfg(debug_assertions)]
+                                println!("⏭️  HP Potion: Skipped (identical image)");
+                                sleep(Duration::from_millis(500)).await;
+                                continue;
                             }
                         }
-                        Err(e) => {
-                            #[cfg(debug_assertions)]
-                            eprintln!("❌ HP OCR failed: {}", e);
+
+                        // Image changed - run OCR
+                        match ocr_service.recognize_hp_potion_count(&image).await {
+                            Ok(hp_potion_count) => {
+                                let mut state = state.lock().await;
+                                state.hp_potion_count = Some(hp_potion_count);
+
+                                // Update HP potion count - INDEPENDENT CALCULATOR
+                                let (hp_used, hp_per_min) = state.hp_calculator.update(hp_potion_count);
+
+                                // Cache HP potion stats
+                                state.latest_stats.hp_potions_used = hp_used as i32;
+                                state.latest_stats.hp_potions_per_minute = hp_per_min;
+
+                                #[cfg(debug_assertions)]
+                                println!("🧪 HP Potion: used={}, per_min={:.2}",
+                                    hp_used, hp_per_min);
+
+                                // Emit event to Frontend immediately
+                                app.emit("ocr:hp-potion-update", HpPotionUpdate { hp_potion_count }).ok();
+
+                                #[cfg(debug_assertions)]
+                                {
+                                    let elapsed = start.elapsed().as_millis();
+                                    println!("✅ HP Potion OCR: {} ({}ms)", hp_potion_count, elapsed);
+                                }
+                            }
+                            Err(e) => {
+                                #[cfg(debug_assertions)]
+                                eprintln!("❌ HP Potion OCR failed: {}", e);
+                            }
                         }
-                    },
+
+                        // Update cache
+                        last_image_bytes = Some(current_bytes);
+                    }
                     Err(e) => {
                         #[cfg(debug_assertions)]
-                        eprintln!("❌ HP capture failed: {}", e);
+                        eprintln!("❌ HP Potion capture failed: {}", e);
                     }
                 }
 
@@ -412,54 +542,91 @@ impl OcrTracker {
             }
 
             #[cfg(debug_assertions)]
-            println!("⏹️  HP OCR task stopped");
+            println!("⏹️  HP Potion OCR task stopped");
         });
     }
 
-    // Independent MP OCR loop with dedicated model instance
-    fn spawn_mp_loop(&self, roi: Roi) {
+    // Independent MP Potion OCR loop with dedicated model instance + image caching
+    fn spawn_mp_potion_loop(&self, roi: Roi, app: AppHandle) {
         let state = Arc::clone(&self.state);
         let stop_signal = Arc::clone(&self.stop_signal);
         let screen_capture = Arc::clone(&self.screen_capture);
 
         tokio::spawn(async move {
             #[cfg(debug_assertions)]
-            println!("🚀 MP OCR task started - loading dedicated model instance");
+            println!("🚀 MP Potion OCR task started - loading dedicated model instance");
 
             // Create dedicated OCR service instance for this task
             let ocr_service = match OcrService::new() {
                 Ok(service) => service,
                 Err(e) => {
-                    eprintln!("❌ MP OCR: Failed to initialize OCR service: {}", e);
+                    eprintln!("❌ MP Potion OCR: Failed to initialize OCR service: {}", e);
                     return;
                 }
             };
 
             #[cfg(debug_assertions)]
-            println!("✅ MP OCR: Model loaded successfully");
+            println!("✅ MP Potion OCR: Model loaded successfully");
+
+            // Image cache for duplicate detection
+            let mut last_image_bytes: Option<Vec<u8>> = None;
 
             while !*stop_signal.lock().await {
                 let start = std::time::Instant::now();
 
                 match screen_capture.capture_region(&roi) {
-                    Ok(image) => match ocr_service.recognize_mp(&image).await {
-                        Ok(mp) => {
-                            let mut state = state.lock().await;
-                            state.mp = Some(mp);
-                            #[cfg(debug_assertions)]
-                            {
-                                let elapsed = start.elapsed().as_millis();
-                                println!("✅ MP OCR: {} ({}ms)", mp, elapsed);
+                    Ok(image) => {
+                        // Convert image to raw bytes for comparison
+                        let current_bytes = image.as_bytes().to_vec();
+
+                        // Check if image is identical to last capture
+                        if let Some(ref last_bytes) = last_image_bytes {
+                            if current_bytes == *last_bytes {
+                                #[cfg(debug_assertions)]
+                                println!("⏭️  MP Potion: Skipped (identical image)");
+                                sleep(Duration::from_millis(500)).await;
+                                continue;
                             }
                         }
-                        Err(e) => {
-                            #[cfg(debug_assertions)]
-                            eprintln!("❌ MP OCR failed: {}", e);
+
+                        // Image changed - run OCR
+                        match ocr_service.recognize_mp_potion_count(&image).await {
+                            Ok(mp_potion_count) => {
+                                let mut state = state.lock().await;
+                                state.mp_potion_count = Some(mp_potion_count);
+
+                                // Update MP potion count - INDEPENDENT CALCULATOR
+                                let (mp_used, mp_per_min) = state.mp_calculator.update(mp_potion_count);
+
+                                // Cache MP potion stats
+                                state.latest_stats.mp_potions_used = mp_used as i32;
+                                state.latest_stats.mp_potions_per_minute = mp_per_min;
+
+                                #[cfg(debug_assertions)]
+                                println!("💊 MP Potion: used={}, per_min={:.2}",
+                                    mp_used, mp_per_min);
+
+                                // Emit event to Frontend immediately
+                                app.emit("ocr:mp-potion-update", MpPotionUpdate { mp_potion_count }).ok();
+
+                                #[cfg(debug_assertions)]
+                                {
+                                    let elapsed = start.elapsed().as_millis();
+                                    println!("✅ MP Potion OCR: {} ({}ms)", mp_potion_count, elapsed);
+                                }
+                            }
+                            Err(e) => {
+                                #[cfg(debug_assertions)]
+                                eprintln!("❌ MP Potion OCR failed: {}", e);
+                            }
                         }
-                    },
+
+                        // Update cache
+                        last_image_bytes = Some(current_bytes);
+                    }
                     Err(e) => {
                         #[cfg(debug_assertions)]
-                        eprintln!("❌ MP capture failed: {}", e);
+                        eprintln!("❌ MP Potion capture failed: {}", e);
                     }
                 }
 
@@ -467,7 +634,7 @@ impl OcrTracker {
             }
 
             #[cfg(debug_assertions)]
-            println!("⏹️  MP OCR task stopped");
+            println!("⏹️  MP Potion OCR task stopped");
         });
     }
 }

@@ -10,9 +10,9 @@ use commands::config::{
     open_roi_preview, save_config, save_roi, save_roi_preview, ConfigManagerState,
 };
 use commands::ocr::{
-    init_ocr_service, recognize_all_parallel, recognize_exp, recognize_hp, recognize_level,
+    init_ocr_service, recognize_all_parallel, recognize_exp, recognize_hp_potion_count, recognize_level,
     check_ocr_health,
-    recognize_map, recognize_mp, OcrServiceState,
+    recognize_map, recognize_mp_potion_count, OcrServiceState,
 };
 use commands::screen_capture::{
     capture_full_screen, capture_region, get_screen_dimensions, init_screen_capture,
@@ -47,9 +47,6 @@ pub fn run() {
     let exp_calculator = ExpCalculator::new().expect("Failed to initialize EXP calculator");
     let exp_calculator_state = ExpCalculatorState(Mutex::new(exp_calculator));
 
-    // Initialize OCR Tracker
-    let tracker_state = TrackerState::new().expect("Failed to initialize OCR tracker");
-
     // Initialize Python server manager
     let python_server = AsyncMutex::new(PythonServerManager::new());
 
@@ -59,9 +56,13 @@ pub fn run() {
         .manage(config_manager)
         .manage(ocr_service)
         .manage(exp_calculator_state)
-        .manage(tracker_state)
         .manage(python_server)
         .setup(|app| {
+            // Initialize OCR Tracker with AppHandle
+            let tracker_state = TrackerState::new(app.handle().clone())
+                .expect("Failed to initialize OCR tracker");
+            app.manage(tracker_state);
+
             // Start Python OCR server on app startup
             let handle = app.handle().clone();
 
@@ -101,8 +102,8 @@ pub fn run() {
             recognize_level,
             recognize_exp,
             recognize_map,
-            recognize_hp,
-            recognize_mp,
+            recognize_hp_potion_count,
+            recognize_mp_potion_count,
             recognize_all_parallel,
             check_ocr_health,
             start_exp_session,

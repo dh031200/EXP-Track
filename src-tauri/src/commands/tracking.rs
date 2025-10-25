@@ -1,15 +1,15 @@
 use crate::models::roi::Roi;
 use crate::services::ocr_tracker::{OcrTracker, TrackingStats};
 use std::sync::Arc;
-use tauri::State;
+use tauri::{AppHandle, State};
 use tokio::sync::Mutex;
 
 /// Global OCR Tracker instance (shared across all commands)
 pub struct TrackerState(pub Arc<Mutex<OcrTracker>>);
 
 impl TrackerState {
-    pub fn new() -> Result<Self, String> {
-        Ok(Self(Arc::new(Mutex::new(OcrTracker::new()?))))
+    pub fn new(app: AppHandle) -> Result<Self, String> {
+        Ok(Self(Arc::new(Mutex::new(OcrTracker::new(app)?))))
     }
 }
 

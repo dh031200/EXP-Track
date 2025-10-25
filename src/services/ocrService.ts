@@ -2,14 +2,14 @@ import { captureRegion, type Roi } from '../lib/tauri';
 import {
   recognizeLevel,
   recognizeExp,
-  recognizeHp,
-  recognizeMp,
+  recognizeHpPotionCount,
+  recognizeMpPotionCount,
 } from '../lib/ocrCommands';
 import {
   useLevelStore,
   useExpStore,
-  useHpStore,
-  useMpStore,
+  useHpPotionStore,
+  useMpPotionStore,
 } from '../stores/ocrStore';
 
 /**
@@ -124,19 +124,19 @@ export class OcrService {
   }
 
   /**
-   * Start HP OCR independent loop
+   * Start HP Potion OCR independent loop
    * Completes OCR → waits 500ms → repeats
    */
   async startHpLoop(getROI: () => Roi | null): Promise<void> {
     this.hpRunning = true;
-    console.log('🚀 HP OCR loop started');
+    console.log('🚀 HP Potion OCR loop started');
 
     while (this.hpRunning) {
       const startTime = Date.now();
       const roi = getROI();
 
       if (!roi) {
-        useHpStore.getState().setError('HP ROI not configured');
+        useHpPotionStore.getState().setError('HP Potion ROI not configured');
         await sleep(500);
         continue;
       }
@@ -144,39 +144,39 @@ export class OcrService {
       try {
         const bytes = await captureRegion(roi);
         const base64 = bytesToBase64(bytes);
-        const result = await recognizeHp(base64);
+        const result = await recognizeHpPotionCount(base64);
         const elapsed = Date.now() - startTime;
 
-        useHpStore.getState().setHp(result);
-        console.log(`✅ HP OCR: ${result} (${elapsed}ms)`);
+        useHpPotionStore.getState().setHpPotionCount(result);
+        console.log(`✅ HP Potion OCR: ${result} (${elapsed}ms)`);
       } catch (err) {
         const elapsed = Date.now() - startTime;
         const error = err instanceof Error ? err.message : String(err);
-        useHpStore.getState().setError(error);
-        console.warn(`❌ HP OCR failed: ${error} (${elapsed}ms)`);
+        useHpPotionStore.getState().setError(error);
+        console.warn(`❌ HP Potion OCR failed: ${error} (${elapsed}ms)`);
       }
 
       // Wait 500ms after completion
       await sleep(500);
     }
 
-    console.log('⏹️  HP OCR loop stopped');
+    console.log('⏹️  HP Potion OCR loop stopped');
   }
 
   /**
-   * Start MP OCR independent loop
+   * Start MP Potion OCR independent loop
    * Completes OCR → waits 500ms → repeats
    */
   async startMpLoop(getROI: () => Roi | null): Promise<void> {
     this.mpRunning = true;
-    console.log('🚀 MP OCR loop started');
+    console.log('🚀 MP Potion OCR loop started');
 
     while (this.mpRunning) {
       const startTime = Date.now();
       const roi = getROI();
 
       if (!roi) {
-        useMpStore.getState().setError('MP ROI not configured');
+        useMpPotionStore.getState().setError('MP Potion ROI not configured');
         await sleep(500);
         continue;
       }
@@ -184,23 +184,23 @@ export class OcrService {
       try {
         const bytes = await captureRegion(roi);
         const base64 = bytesToBase64(bytes);
-        const result = await recognizeMp(base64);
+        const result = await recognizeMpPotionCount(base64);
         const elapsed = Date.now() - startTime;
 
-        useMpStore.getState().setMp(result);
-        console.log(`✅ MP OCR: ${result} (${elapsed}ms)`);
+        useMpPotionStore.getState().setMpPotionCount(result);
+        console.log(`✅ MP Potion OCR: ${result} (${elapsed}ms)`);
       } catch (err) {
         const elapsed = Date.now() - startTime;
         const error = err instanceof Error ? err.message : String(err);
-        useMpStore.getState().setError(error);
-        console.warn(`❌ MP OCR failed: ${error} (${elapsed}ms)`);
+        useMpPotionStore.getState().setError(error);
+        console.warn(`❌ MP Potion OCR failed: ${error} (${elapsed}ms)`);
       }
 
       // Wait 500ms after completion
       await sleep(500);
     }
 
-    console.log('⏹️  MP OCR loop stopped');
+    console.log('⏹️  MP Potion OCR loop stopped');
   }
 
   /**
@@ -275,8 +275,8 @@ export class OcrService {
   clearAllStores(): void {
     useLevelStore.getState().clear();
     useExpStore.getState().clear();
-    useHpStore.getState().clear();
-    useMpStore.getState().clear();
+    useHpPotionStore.getState().clear();
+    useMpPotionStore.getState().clear();
   }
 }
 

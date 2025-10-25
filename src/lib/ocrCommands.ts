@@ -60,21 +60,21 @@ export async function recognizeMap(imageBase64: string): Promise<MapResult> {
 }
 
 /**
- * Recognize HP value from image
+ * Recognize HP potion count from inventory image
  * @param imageBase64 Base64-encoded PNG image
- * @returns HP value
+ * @returns HP potion count
  */
-export async function recognizeHp(imageBase64: string): Promise<number> {
-  return await invoke<number>('recognize_hp', { imageBase64 });
+export async function recognizeHpPotionCount(imageBase64: string): Promise<number> {
+  return await invoke<number>('recognize_hp_potion_count', { imageBase64 });
 }
 
 /**
- * Recognize MP value from image
+ * Recognize MP potion count from inventory image
  * @param imageBase64 Base64-encoded PNG image
- * @returns MP value
+ * @returns MP potion count
  */
-export async function recognizeMp(imageBase64: string): Promise<number> {
-  return await invoke<number>('recognize_mp', { imageBase64 });
+export async function recognizeMpPotionCount(imageBase64: string): Promise<number> {
+  return await invoke<number>('recognize_mp_potion_count', { imageBase64 });
 }
 
 /**

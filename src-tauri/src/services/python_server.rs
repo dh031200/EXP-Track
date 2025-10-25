@@ -95,12 +95,12 @@ impl PythonServerManager {
         }
     }
 
-    /// Wait for server to be ready (max 15 seconds)
+    /// Wait for server to be ready (max 30 seconds)
     async fn wait_for_ready(&self) -> Result<(), String> {
-        // Initial wait for server process to boot (PyInstaller takes ~1 second)
-        sleep(Duration::from_millis(1500)).await;
+        // Initial wait for server process to boot (PyInstaller takes ~2-3 seconds)
+        sleep(Duration::from_millis(2000)).await;
 
-        let max_attempts = 30; // 30 attempts * 500ms = 15 seconds
+        let max_attempts = 60; // 60 attempts * 500ms = 30 seconds
         let delay = Duration::from_millis(500);
 
         for attempt in 1..=max_attempts {
@@ -118,7 +118,7 @@ impl PythonServerManager {
             sleep(delay).await;
         }
 
-        Err("Server failed to start within 15 seconds. Check if port 39835 is available.".to_string())
+        Err("Server failed to start within 30 seconds. Check if port 39835 is available.".to_string())
     }
 
     /// Stop the server gracefully via shutdown endpoint, fallback to kill

@@ -40,14 +40,14 @@ impl OcrService {
         Err("Map recognition not yet implemented in HTTP OCR server".to_string())
     }
 
-    /// Recognize HP value from image (numbers only)
-    pub async fn recognize_hp(&self, image: &DynamicImage) -> Result<u32, String> {
-        self.http_client.recognize_hp(image).await
+    /// Recognize HP potion count from inventory image (numbers only)
+    pub async fn recognize_hp_potion_count(&self, image: &DynamicImage) -> Result<u32, String> {
+        self.http_client.recognize_hp_potion_count(image).await
     }
 
-    /// Recognize MP value from image (numbers only)
-    pub async fn recognize_mp(&self, image: &DynamicImage) -> Result<u32, String> {
-        self.http_client.recognize_mp(image).await
+    /// Recognize MP potion count from inventory image (numbers only)
+    pub async fn recognize_mp_potion_count(&self, image: &DynamicImage) -> Result<u32, String> {
+        self.http_client.recognize_mp_potion_count(image).await
     }
 }
 
@@ -111,9 +111,9 @@ pub async fn recognize_map(
     Err("Map recognition not yet implemented in HTTP OCR server".to_string())
 }
 
-/// Tauri command: Recognize HP value from base64 image
+/// Tauri command: Recognize HP potion count from base64 image
 #[tauri::command]
-pub async fn recognize_hp(
+pub async fn recognize_hp_potion_count(
     state: State<'_, OcrServiceState>,
     image_base64: String,
 ) -> Result<u32, String> {
@@ -122,12 +122,12 @@ pub async fn recognize_hp(
         service.http_client.clone()
     };
     let image = decode_base64_image(&image_base64)?;
-    http_client.recognize_hp(&image).await
+    http_client.recognize_hp_potion_count(&image).await
 }
 
-/// Tauri command: Recognize MP value from base64 image
+/// Tauri command: Recognize MP potion count from base64 image
 #[tauri::command]
-pub async fn recognize_mp(
+pub async fn recognize_mp_potion_count(
     state: State<'_, OcrServiceState>,
     image_base64: String,
 ) -> Result<u32, String> {
@@ -136,7 +136,7 @@ pub async fn recognize_mp(
         service.http_client.clone()
     };
     let image = decode_base64_image(&image_base64)?;
-    http_client.recognize_mp(&image).await
+    http_client.recognize_mp_potion_count(&image).await
 }
 
 /// Tauri command: Recognize all 4 OCR operations in parallel
@@ -161,7 +161,7 @@ pub async fn recognize_all_parallel(
     let mp_image = decode_base64_image(&mp_base64).ok();
 
     // Run all 4 OCR operations in parallel
-    let (level_result, exp_result, hp_result, mp_result) = tokio::join!(
+    let (level_result, exp_result, hp_potion_result, mp_potion_result) = tokio::join!(
         async {
             match level_image {
                 Some(ref img) => http_client.recognize_level(img).await.ok(),
@@ -176,13 +176,13 @@ pub async fn recognize_all_parallel(
         },
         async {
             match hp_image {
-                Some(ref img) => http_client.recognize_hp(img).await.ok(),
+                Some(ref img) => http_client.recognize_hp_potion_count(img).await.ok(),
                 None => None,
             }
         },
         async {
             match mp_image {
-                Some(ref img) => http_client.recognize_mp(img).await.ok(),
+                Some(ref img) => http_client.recognize_mp_potion_count(img).await.ok(),
                 None => None,
             }
         },
@@ -191,8 +191,8 @@ pub async fn recognize_all_parallel(
     Ok(CombinedOcrResult {
         level: level_result,
         exp: exp_result,
-        hp: hp_result,
-        mp: mp_result,
+        hp: hp_potion_result,
+        mp: mp_potion_result,
     })
 }
 

@@ -72,58 +72,58 @@ export const useExpStore = create<ExpStore>((set) => ({
 }));
 
 /**
- * HP OCR Store - Independent state for HP recognition
+ * HP Potion OCR Store - Independent state for HP potion count recognition
  */
-interface HpStore {
-  hp: number | null;
+interface HpPotionStore {
+  hpPotionCount: number | null;
   lastUpdated: number;
   error: string | null;
-  setHp: (hp: number) => void;
+  setHpPotionCount: (count: number) => void;
   setError: (error: string) => void;
   clear: () => void;
 }
 
-export const useHpStore = create<HpStore>((set) => ({
-  hp: null,
+export const useHpPotionStore = create<HpPotionStore>((set) => ({
+  hpPotionCount: null,
   lastUpdated: 0,
   error: null,
-  setHp: (hp) => set({
-    hp,
+  setHpPotionCount: (count) => set({
+    hpPotionCount: count,
     lastUpdated: Date.now(),
     error: null,
   }),
   setError: (error) => set({ error }),
   clear: () => set({
-    hp: null,
+    hpPotionCount: null,
     lastUpdated: 0,
     error: null,
   }),
 }));
 
 /**
- * MP OCR Store - Independent state for MP recognition
+ * MP Potion OCR Store - Independent state for MP potion count recognition
  */
-interface MpStore {
-  mp: number | null;
+interface MpPotionStore {
+  mpPotionCount: number | null;
   lastUpdated: number;
   error: string | null;
-  setMp: (mp: number) => void;
+  setMpPotionCount: (count: number) => void;
   setError: (error: string) => void;
   clear: () => void;
 }
 
-export const useMpStore = create<MpStore>((set) => ({
-  mp: null,
+export const useMpPotionStore = create<MpPotionStore>((set) => ({
+  mpPotionCount: null,
   lastUpdated: 0,
   error: null,
-  setMp: (mp) => set({
-    mp,
+  setMpPotionCount: (count) => set({
+    mpPotionCount: count,
     lastUpdated: Date.now(),
     error: null,
   }),
   setError: (error) => set({ error }),
   clear: () => set({
-    mp: null,
+    mpPotionCount: null,
     lastUpdated: 0,
     error: null,
   }),
