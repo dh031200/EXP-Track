@@ -10,7 +10,7 @@ import { useRoiStore } from "./stores/roiStore";
 import { useTrackingStore } from "./stores/trackingStore";
 import { useSessionStore } from "./stores/sessionStore";
 import { useTimerSettingsStore } from "./stores/timerSettingsStore";
-import { useExpTracker } from "./hooks/useExpTracker";
+import { useParallelOcrTracker } from "./hooks/useParallelOcrTracker";
 import { initScreenCapture } from "./lib/tauri";
 import { checkOcrHealth } from "./lib/ocrCommands";
 import "./App.css";
@@ -60,8 +60,8 @@ function App() {
 
   const { selectedAverageInterval, averageCalculationMode } = useTimerSettingsStore();
 
-  // EXP Tracker hook
-  const expTracker = useExpTracker();
+  // Parallel OCR Tracker hook
+  const parallelOcrTracker = useParallelOcrTracker();
 
   // Check if any ROI is configured
   const hasAnyRoi = levelRoi !== null || expRoi !== null;
@@ -119,14 +119,14 @@ function App() {
 
   // Record EXP data points every minute for per-interval calculation
   useEffect(() => {
-    if (trackingState === 'tracking' && expTracker.state.stats) {
+    if (trackingState === 'tracking' && parallelOcrTracker.stats) {
       const interval = setInterval(() => {
         const now = Date.now();
-        const totalExp = expTracker.state.stats?.total_exp || 0;
+        const totalExp = parallelOcrTracker.stats?.total_exp || 0;
         
         setExpDataPoints(prev => {
-          const hpPotions = expTracker.state.stats?.hp_potions_used || 0;
-          const mpPotions = expTracker.state.stats?.mp_potions_used || 0;
+          const hpPotions = parallelOcrTracker.stats?.hp_potions_used || 0;
+          const mpPotions = parallelOcrTracker.stats?.mp_potions_used || 0;
           const newPoints = [...prev, { timestamp: now, totalExp, hpPotions, mpPotions }];
           // Keep only last 24 hours of data (for history graphs)
           const cutoffTime = now - 24 * 60 * 60 * 1000;
@@ -136,7 +136,7 @@ function App() {
       
       return () => clearInterval(interval);
     }
-  }, [trackingState, expTracker.state.stats]);
+  }, [trackingState, parallelOcrTracker.stats]);
 
   // Reset data points when tracking is reset
   useEffect(() => {
@@ -155,7 +155,7 @@ function App() {
 
   // Calculate average exp for selected interval
   const calculateAverage = (): { label: string; value: string } | null => {
-    if (selectedAverageInterval === 'none' || !expTracker.state.stats) {
+    if (selectedAverageInterval === 'none' || !parallelOcrTracker.stats) {
       return null;
     }
 
@@ -176,7 +176,7 @@ function App() {
       '1hour': '시간',
     }[selectedAverageInterval] || '';
 
-    const stats = expTracker.state.stats;
+    const stats = parallelOcrTracker.stats;
     const intervalSeconds = intervalMinutes * 60;
 
     // Use real-time stats from OCR tracker
@@ -249,7 +249,7 @@ function App() {
 
   // Calculate HP/MP potion usage per minute (based on recent interval)
   const calculatePotionUsage = (): { hpPerMinute: number; mpPerMinute: number } => {
-    const stats = expTracker.state.stats;
+    const stats = parallelOcrTracker.stats;
     if (!stats || stats.elapsed_seconds === 0) {
       return { hpPerMinute: 0, mpPerMinute: 0 };
     }
@@ -319,17 +319,17 @@ function App() {
       startSession();
       startTracking();
       // Start OCR and exp recording
-      await expTracker.start();
+      await parallelOcrTracker.start();
     } else if (trackingState === 'paused') {
       // Resume tracking
       startTracking();
       // Resume OCR and exp recording
-      await expTracker.start();
+      await parallelOcrTracker.start();
     } else if (trackingState === 'tracking') {
       // Pause tracking
       pauseTracking();
       // Pause OCR and exp recording
-      expTracker.stop();
+      parallelOcrTracker.stop();
     }
   };
 
@@ -340,7 +340,7 @@ function App() {
     }
     resetTracking();
     // Clear exp data and reset to initial state
-    await expTracker.reset();
+    await parallelOcrTracker.reset();
   };
 
   const handleClose = async () => {
@@ -627,9 +627,9 @@ function App() {
               marginTop: '8px' /* Spacing between timer and cards */
             }}>
               <ExpTrackerDisplay
-                stats={expTracker.state.stats}
-                isTracking={expTracker.state.isTracking}
-                error={expTracker.state.error}
+                stats={parallelOcrTracker.stats}
+                isTracking={parallelOcrTracker.isRunning()}
+                error={null}
                 averageData={calculateAverage()}
                 calculationMode={averageCalculationMode}
                 intervalLabel={intervalLabel}

@@ -30,11 +30,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global OCR engine (initialized once)
-ocr_engine: Optional[RapidOCR] = None
+# OCR engine pool - one engine per worker for true parallelism
+ocr_engines: list[RapidOCR] = []
 
 # Thread pool for CPU-intensive OCR operations
 executor: Optional[ThreadPoolExecutor] = None
+
+# Round-robin index for load balancing
+current_engine_idx = 0
 
 
 @app.on_event("startup")
@@ -54,9 +57,9 @@ async def startup_event():
     models_dir = base_path / "rapidocr" / "models"
 
     # Model file paths
-    det_model_path = models_dir / "ch_PP-OCRv5_mobile_det.onnx"
+    det_model_path = models_dir / "ch_PP-OCRv4_det_infer.onnx"
     cls_model_path = models_dir / "ch_ppocr_mobile_v2.0_cls_infer.onnx"
-    rec_model_path = models_dir / "korean_PP-OCRv5_rec_mobile_infer.onnx"
+    rec_model_path = models_dir / "ch_PP-OCRv4_rec_infer.onnx"
 
     print(f"📁 Models directory: {models_dir}")
     print(f"   Det model: {det_model_path.exists()}")
@@ -66,17 +69,8 @@ async def startup_event():
     # Initialize RapidOCR engine with explicit model paths
     ocr_engine = RapidOCR(
         params={
-            "Det.engine_type": EngineType.ONNXRUNTIME,
-            "Det.lang_type": LangDet.CH,
-            "Det.model_type": ModelType.MOBILE,
-            "Det.ocr_version": OCRVersion.PPOCRV5,
             "Det.model_path": str(det_model_path),
-            "Rec.engine_type": EngineType.ONNXRUNTIME,
-            "Rec.lang_type": LangRec.KOREAN,
-            "Rec.model_type": ModelType.MOBILE,
-            "Rec.ocr_version": OCRVersion.PPOCRV5,
             "Rec.model_path": str(rec_model_path),
-            "Cls.engine_type": EngineType.ONNXRUNTIME,
             "Cls.model_path": str(cls_model_path),
         }
     )
@@ -148,7 +142,10 @@ def extract_text_from_result(result) -> str:
 def _run_ocr_sync(image: np.ndarray) -> str:
     """Synchronous OCR function to run in thread pool"""
     # Call with text_score=0.65 for lower detection threshold
-    result = ocr_engine(image, text_score=0.65)
+    result = ocr_engine(image, text_score=0.85)
+
+    print(result)
+
     return extract_text_from_result(result)
 
 

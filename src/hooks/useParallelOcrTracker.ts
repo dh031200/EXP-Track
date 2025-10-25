@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { ocrService } from '../services/ocrService';
 import { useRoiStore } from '../stores/roiStore';
 import { useLevelStore, useExpStore } from '../stores/ocrStore';
@@ -20,7 +20,7 @@ export function useParallelOcrTracker() {
   const isTrackingRef = useRef(false);
   const sessionStartedRef = useRef(false);
   const statsIntervalRef = useRef<number | null>(null);
-  const currentStatsRef = useRef<ExpStats | null>(null);
+  const [currentStats, setCurrentStats] = useState<ExpStats | null>(null);
 
   // Subscribe to level and EXP changes to update ExpCalculator
   const prevLevelRef = useRef<number | null>(null);
@@ -75,7 +75,7 @@ export function useParallelOcrTracker() {
     sessionStartedRef.current = false;
     prevLevelRef.current = null;
     prevExpRef.current = null;
-    currentStatsRef.current = null;
+    setCurrentStats(null);
 
     try {
       await resetExpSession();
@@ -136,19 +136,12 @@ export function useParallelOcrTracker() {
         // Update existing session
         console.log('🔵 Updating EXP data:', { level, exp, percentage });
         const stats = await addExpData(level, exp, percentage);
-        currentStatsRef.current = stats;
+        setCurrentStats(stats);
       }
     } catch (err) {
       console.error('ExpCalculator update failed:', err);
     }
   }
-
-  /**
-   * Get current EXP stats (poll-based, updated every second)
-   */
-  const getCurrentStats = useCallback((): ExpStats | null => {
-    return currentStatsRef.current;
-  }, []);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -166,7 +159,7 @@ export function useParallelOcrTracker() {
     start,
     stop,
     reset,
-    getCurrentStats,
+    stats: currentStats,
     isRunning: () => ocrService.isRunning(),
   };
 }

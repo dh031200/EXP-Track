@@ -1,10 +1,9 @@
 import React from 'react';
-import { formatNumber, formatPercentage } from '../lib/expCommands';
-import { TrackingStats } from '../lib/trackingCommands';
+import { formatNumber, formatPercentage, type ExpStats } from '../lib/expCommands';
 import './ExpTrackerDisplay.css';
 
 export interface ExpTrackerDisplayProps {
-  stats: TrackingStats | null;
+  stats: ExpStats | null;
   isTracking: boolean;
   error: string | null;
   averageData: { label: string; value: string } | null;
