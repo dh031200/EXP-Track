@@ -121,7 +121,52 @@ impl PythonServerManager {
         Err("Server failed to start within 30 seconds. Check if port 39835 is available.".to_string())
     }
 
-    /// Stop the server gracefully via shutdown endpoint, fallback to kill
+    /// Stop the server gracefully via shutdown endpoint (async version)
+    pub async fn stop_async(&mut self) {
+        #[cfg(debug_assertions)]
+        println!("⏹️  Stopping Python OCR server...");
+
+        // Try graceful shutdown via HTTP endpoint first
+        let shutdown_url = format!("{}/shutdown", self.base_url);
+        
+        let graceful_shutdown = match reqwest::Client::new()
+            .post(&shutdown_url)
+            .timeout(Duration::from_secs(2))
+            .send()
+            .await
+        {
+            Ok(_) => {
+                #[cfg(debug_assertions)]
+                println!("✅ Graceful shutdown signal sent");
+                true
+            }
+            Err(_) => false,
+        };
+
+        if graceful_shutdown {
+            // Wait a bit for graceful shutdown
+            sleep(Duration::from_millis(1000)).await;
+        }
+
+        // Fallback: force kill if we have a process handle
+        if let Some(mut child) = self.process.take() {
+            match child.kill() {
+                Ok(_) => {
+                    #[cfg(debug_assertions)]
+                    println!("✅ Python OCR server stopped (forced)");
+                }
+                Err(e) => {
+                    #[cfg(debug_assertions)]
+                    eprintln!("❌ Failed to stop server: {}", e);
+                }
+            }
+        } else if graceful_shutdown {
+            #[cfg(debug_assertions)]
+            println!("✅ Python OCR server stopped (graceful)");
+        }
+    }
+
+    /// Stop the server gracefully via shutdown endpoint, fallback to kill (sync version for Drop)
     pub fn stop(&mut self) {
         #[cfg(debug_assertions)]
         println!("⏹️  Stopping Python OCR server...");

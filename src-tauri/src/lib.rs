@@ -84,6 +84,43 @@ pub fn run() {
 
             Ok(())
         })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // Prevent immediate close - we need to cleanup first
+                api.prevent_close();
+                
+                let app = window.app_handle().clone();
+                
+                // Spawn async cleanup task to avoid blocking the event loop
+                tauri::async_runtime::spawn(async move {
+                    // Stop OCR tracking
+                    let tracker_state = app.state::<TrackerState>();
+                    {
+                        let tracker = tracker_state.0.lock().await;
+                        tracker.stop_tracking().await;
+
+                        #[cfg(debug_assertions)]
+                        println!("🛑 OCR tracking stopped");
+                    }
+
+                    // Shutdown Python OCR server
+                    let server_state = app.state::<AsyncMutex<PythonServerManager>>();
+                    {
+                        let mut server = server_state.lock().await;
+                        server.stop_async().await;
+
+                        #[cfg(debug_assertions)]
+                        println!("🛑 Python server shutdown signal sent");
+                    }
+
+                    #[cfg(debug_assertions)]
+                    println!("👋 Application closing");
+                    
+                    // Now that cleanup is complete, exit the app
+                    app.exit(0);
+                });
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             greet,
             init_screen_capture,

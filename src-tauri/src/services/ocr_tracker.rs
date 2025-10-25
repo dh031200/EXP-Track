@@ -31,6 +31,7 @@ pub struct TrackingStats {
     pub mp_potions_used: i32,
     pub hp_potions_per_minute: f64,
     pub mp_potions_per_minute: f64,
+    pub ocr_server_healthy: bool,
 }
 
 /// OCR Tracker state
@@ -51,6 +52,8 @@ struct TrackerState {
     level_match_count: u32,
     // Session started flag
     session_started: bool,
+    // OCR server health status
+    ocr_server_healthy: bool,
     // Latest stats cache - each calculator updates its own fields
     latest_stats: TrackingStats,
 }
@@ -71,6 +74,7 @@ impl TrackerState {
             prev_level: None,
             level_match_count: 0,
             session_started: false,
+            ocr_server_healthy: true,
             latest_stats: TrackingStats {
                 level: None,
                 exp: None,
@@ -88,6 +92,7 @@ impl TrackerState {
                 mp_potions_used: 0,
                 hp_potions_per_minute: 0.0,
                 mp_potions_per_minute: 0.0,
+                ocr_server_healthy: true,
             },
         })
     }
@@ -178,6 +183,7 @@ impl TrackerState {
             mp_potions_used: self.latest_stats.mp_potions_used,
             hp_potions_per_minute: self.latest_stats.hp_potions_per_minute,
             mp_potions_per_minute: self.latest_stats.mp_potions_per_minute,
+            ocr_server_healthy: self.ocr_server_healthy,
         }
     }
 }
@@ -248,14 +254,15 @@ impl OcrTracker {
         state.is_tracking = true;
         drop(state);
 
-        // Spawn 4 independent OCR tasks
+        // Spawn 4 independent OCR tasks + health check
         self.spawn_level_loop(level_roi, self.app.clone());
         self.spawn_exp_loop(exp_roi, self.app.clone());
         self.spawn_hp_potion_loop(hp_roi, self.app.clone());
         self.spawn_mp_potion_loop(mp_roi, self.app.clone());
+        self.spawn_health_check_loop(self.app.clone());
 
         #[cfg(debug_assertions)]
-        println!("🚀 OCR Tracker started with 4 parallel tasks");
+        println!("🚀 OCR Tracker started with 4 OCR tasks + health monitor");
         Ok(())
     }
 
@@ -635,6 +642,60 @@ impl OcrTracker {
 
             #[cfg(debug_assertions)]
             println!("⏹️  MP Potion OCR task stopped");
+        });
+    }
+
+    /// Spawn health check loop - monitors OCR server health
+    fn spawn_health_check_loop(&self, _app: AppHandle) {
+        let state = Arc::clone(&self.state);
+        let stop_signal = Arc::clone(&self.stop_signal);
+
+        tokio::spawn(async move {
+            #[cfg(debug_assertions)]
+            println!("🏥 Health check loop started");
+
+            while !*stop_signal.lock().await {
+                // Create a temporary OCR service to check health
+                match OcrService::new() {
+                    Ok(service) => {
+                        match service.health_check().await {
+                            Ok(_) => {
+                                let mut state = state.lock().await;
+                                if !state.ocr_server_healthy {
+                                    #[cfg(debug_assertions)]
+                                    println!("✅ OCR server is now healthy");
+                                }
+                                state.ocr_server_healthy = true;
+                                state.latest_stats.ocr_server_healthy = true;
+                            }
+                            Err(e) => {
+                                let mut state = state.lock().await;
+                                if state.ocr_server_healthy {
+                                    #[cfg(debug_assertions)]
+                                    println!("❌ OCR server health check failed: {}", e);
+                                }
+                                state.ocr_server_healthy = false;
+                                state.latest_stats.ocr_server_healthy = false;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let mut state = state.lock().await;
+                        if state.ocr_server_healthy {
+                            #[cfg(debug_assertions)]
+                            println!("❌ Failed to create OCR service for health check: {}", e);
+                        }
+                        state.ocr_server_healthy = false;
+                        state.latest_stats.ocr_server_healthy = false;
+                    }
+                }
+
+                // Check every 2 seconds
+                sleep(Duration::from_secs(2)).await;
+            }
+
+            #[cfg(debug_assertions)]
+            println!("⏹️  Health check loop stopped");
         });
     }
 }

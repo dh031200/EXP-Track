@@ -49,6 +49,11 @@ impl OcrService {
     pub async fn recognize_mp_potion_count(&self, image: &DynamicImage) -> Result<u32, String> {
         self.http_client.recognize_mp_potion_count(image).await
     }
+
+    /// Check if OCR server is healthy
+    pub async fn health_check(&self) -> Result<(), String> {
+        self.http_client.health_check().await
+    }
 }
 
 /// Initialize OCR service state
