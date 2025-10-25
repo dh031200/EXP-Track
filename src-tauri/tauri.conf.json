@@ -67,19 +67,10 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "resources/tesseract/tessdata/*",
       "resources/ocr_server/*",
       "resources/ocr_server/**/*"
     ],
     "macOS": {
-      "frameworks": [
-        "vendor/opencv/lib/libopencv_core.4.12.0.dylib",
-        "vendor/opencv/lib/libopencv_imgproc.4.12.0.dylib",
-        "vendor/opencv/lib/libopencv_imgcodecs.4.12.0.dylib",
-        "vendor/opencv/lib/libopencv_calib3d.4.12.0.dylib",
-        "vendor/opencv/lib/libopencv_features2d.4.12.0.dylib",
-        "vendor/opencv/lib/libopencv_flann.4.12.0.dylib"
-      ],
       "entitlements": "entitlements.plist",
       "signingIdentity": null,
       "providerShortName": null

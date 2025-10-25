@@ -148,18 +148,16 @@ impl Default for AudioConfig {
     }
 }
 
-/// OCR engine choice
+/// OCR engine choice (Python FastAPI server only)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum OcrEngine {
-    PaddleOcr,
-    Tesseract,
     Native,
 }
 
 impl Default for OcrEngine {
     fn default() -> Self {
-        Self::PaddleOcr
+        Self::Native
     }
 }
 
@@ -193,7 +191,7 @@ pub struct AdvancedConfig {
 impl Default for AdvancedConfig {
     fn default() -> Self {
         Self {
-            ocr_engine: OcrEngine::PaddleOcr,
+            ocr_engine: OcrEngine::Native,
             preprocessing: PreprocessingConfig::default(),
             spike_threshold: 2.0,
             data_retention_days: 30,
@@ -247,7 +245,7 @@ mod tests {
         assert!(config.audio.enable_sounds);
 
         // Advanced config
-        assert_eq!(config.advanced.ocr_engine, OcrEngine::PaddleOcr);
+        assert_eq!(config.advanced.ocr_engine, OcrEngine::Native);
         assert_eq!(config.advanced.spike_threshold, 2.0);
     }
 
