@@ -8,8 +8,13 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "tauri:build": "tauri build",
+    "tauri:build:notarize": "tauri build --config src-tauri/tauri.notarize.conf.json",
     "icon:generate": "tauri icon src-tauri/icons/EXP_Tracker.png",
     "prebuild": "npm run icon:generate",
+    "build:notarize": "npm run build && npm run tauri:build:notarize",
+    "clean": "rm -rf dist node_modules/.vite src-tauri/target",
+    "clean:build": "npm run clean && npm install && npm run tauri build",
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage"

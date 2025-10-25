@@ -160,6 +160,7 @@ function App() {
     }
 
     const intervalMinutes = {
+      'none': 0,
       '1min': 1,
       '5min': 5,
       '10min': 10,
@@ -254,6 +255,7 @@ function App() {
     }
 
     const intervalMinutes = {
+      'none': 0,
       '1min': 1,
       '5min': 5,
       '10min': 10,
@@ -294,6 +296,7 @@ function App() {
 
   // Get interval label for display
   const intervalLabel = {
+    'none': '시간',
     '1min': '1분',
     '5min': '5분',
     '10min': '10분',
@@ -405,7 +408,7 @@ function App() {
       {/* Titlebar with integrated controls */}
       {!isSelecting && (
         <div
-          onMouseDown={(e) => e.preventDefault()}
+          onMouseDown={handleDragStart}
           style={{
             position: 'absolute',
             top: 0,
@@ -419,7 +422,7 @@ function App() {
             borderTopLeftRadius: '12px',
             borderTopRightRadius: '12px',
             borderBottom: '1px solid rgba(0, 0, 0, 0.08)',
-            cursor: 'default',
+            cursor: 'move',
             userSelect: 'none',
           }}
         >
@@ -716,28 +719,22 @@ function App() {
               </button>
               <button
                 onClick={handleOpenHistory}
+                disabled={true}
                 style={{
                   width: '30px',
                   height: '30px',
-                  background: 'rgba(0, 0, 0, 0.05)',
-                  border: '1px solid rgba(0, 0, 0, 0.1)',
+                  background: 'rgba(0, 0, 0, 0.03)',
+                  border: '1px solid rgba(0, 0, 0, 0.05)',
                   borderRadius: '6px',
-                  cursor: 'pointer',
+                  cursor: 'not-allowed',
                   transition: 'all 0.15s ease',
                   padding: 0,
                   display: 'flex',
                   alignItems: 'center',
-                  justifyContent: 'center'
+                  justifyContent: 'center',
+                  opacity: 0.4
                 }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'rgba(0, 0, 0, 0.08)';
-                  e.currentTarget.style.transform = 'scale(1.05)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'rgba(0, 0, 0, 0.05)';
-                  e.currentTarget.style.transform = 'scale(1)';
-                }}
-                title="히스토리"
+                title="히스토리 (준비 중)"
               >
                 <img src={historyIcon} alt="History" style={{ width: '20px', height: '20px' }} />
               </button>

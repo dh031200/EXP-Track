@@ -81,8 +81,7 @@
         "vendor/opencv/lib/libopencv_flann.4.12.0.dylib"
       ],
       "entitlements": "entitlements.plist",
-      "signingIdentity": null,
-      "providerShortName": null
+      "signingIdentity": "-"
     }
   }
 }

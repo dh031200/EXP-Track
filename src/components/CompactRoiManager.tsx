@@ -14,6 +14,12 @@ import { useRoiStore, type RoiType } from '../stores/roiStore';
 import { invoke } from '@tauri-apps/api/core';
 import './CompactRoiManager.css';
 
+// Import icons
+import lvIcon from '/icons/lv.png';
+import hpIcon from '/icons/hp.png';
+import expIcon from '/icons/exp.png';
+import mpIcon from '/icons/mp.png';
+
 interface WindowState {
   width: number;
   height: number;
@@ -26,10 +32,10 @@ interface CompactRoiManagerProps {
 }
 
 const ROI_CONFIGS = [
-  { type: 'level' as RoiType, label: 'Level', icon: '/icons/lv.png', color: '#4CAF50' },
-  { type: 'hp' as RoiType, label: 'HP', icon: '/icons/hp.png', color: '#F44336' },
-  { type: 'exp' as RoiType, label: 'EXP', icon: '/icons/exp.png', color: '#2196F3' },
-  { type: 'mp' as RoiType, label: 'MP', icon: '/icons/mp.png', color: '#9C27B0' },
+  { type: 'level' as RoiType, label: 'Level', icon: lvIcon, color: '#4CAF50' },
+  { type: 'hp' as RoiType, label: 'HP', icon: hpIcon, color: '#F44336' },
+  { type: 'exp' as RoiType, label: 'EXP', icon: expIcon, color: '#2196F3' },
+  { type: 'mp' as RoiType, label: 'MP', icon: mpIcon, color: '#9C27B0' },
   // { type: 'mapLocation' as RoiType, label: 'Map', icon: '🗺️', color: '#9C27B0' }, // Commented out temporarily
   // { type: 'meso' as RoiType, label: 'Meso', icon: '💰', color: '#FF9800' }, // Commented out temporarily
 ];

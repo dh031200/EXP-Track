@@ -5,7 +5,6 @@ Provides REST API for OCR operations
 """
 import base64
 import io
-import re
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor
 import asyncio
@@ -15,7 +14,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
 from pydantic import BaseModel
-from rapidocr import RapidOCR
+from rapidocr import RapidOCR, EngineType, LangDet, LangRec, ModelType, OCRVersion
 
 app = FastAPI(title="EXP Tracker OCR Server", version="1.0.0")
 
@@ -40,7 +39,19 @@ async def startup_event():
     """Initialize OCR engine on startup"""
     global ocr_engine, executor
     print("🚀 Initializing RapidOCR engine...")
-    ocr_engine = RapidOCR()
+    # Initialize RapidOCR engine with ONNX Runtime + Korean + Mobile + PP-OCRv5
+    ocr_engine = RapidOCR(
+        params={
+            "Det.engine_type": EngineType.ONNXRUNTIME,
+            "Det.lang_type": LangDet.CH,
+            "Det.model_type": ModelType.MOBILE,
+            "Det.ocr_version": OCRVersion.PPOCRV5,
+            "Rec.engine_type": EngineType.ONNXRUNTIME,
+            "Rec.lang_type": LangRec.KOREAN,
+            "Rec.model_type": ModelType.MOBILE,
+            "Rec.ocr_version": OCRVersion.PPOCRV5,
+        }
+    )
     # Create thread pool with 4 workers for parallel OCR
     executor = ThreadPoolExecutor(max_workers=4)
     print("✅ RapidOCR engine ready with 4 worker threads")
@@ -60,26 +71,25 @@ class ImageRequest(BaseModel):
     image_base64: str
 
 
-class LevelResponse(BaseModel):
-    level: int
-    raw_text: str
-
-
-class ExpResponse(BaseModel):
-    absolute: int
-    percentage: float
-    raw_text: str
-
-
-class HpMpResponse(BaseModel):
-    value: int
-    raw_text: str
-
-
 class OcrResponse(BaseModel):
     """Unified OCR response - returns raw text only"""
     text: str
     confidence: Optional[float] = None
+
+
+# Legacy response models (not used anymore)
+# class LevelResponse(BaseModel):
+#     level: int
+#     raw_text: str
+#
+# class ExpResponse(BaseModel):
+#     absolute: int
+#     percentage: float
+#     raw_text: str
+#
+# class HpMpResponse(BaseModel):
+#     value: int
+#     raw_text: str
 
 
 # Helper functions
@@ -100,127 +110,17 @@ def extract_text_from_result(result) -> str:
     return ""
 
 
-# OCR Endpoints
-@app.post("/ocr/level", response_model=LevelResponse)
-async def recognize_level(request: ImageRequest):
-    """Recognize level from image"""
-    try:
-        image = decode_base64_image(request.image_base64)
-        result = ocr_engine(image)
-        raw_text = extract_text_from_result(result)
-        
-        # Parse level (strip all non-digits)
-        digits = "".join(filter(str.isdigit, raw_text))
-        
-        if not digits:
-            raise HTTPException(status_code=400, detail=f"No digits found in OCR output: '{raw_text}'")
-        
-        level = int(digits)
-        
-        # Validate range
-        if level < 1 or level > 300:
-            raise HTTPException(status_code=400, detail=f"Level {level} out of valid range (1-300)")
-        
-        return LevelResponse(
-            level=level,
-            raw_text=f"LV. {level}"
-        )
-    
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Failed to parse level: {str(e)}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"OCR failed: {str(e)}")
-
-
-@app.post("/ocr/exp", response_model=ExpResponse)
-async def recognize_exp(request: ImageRequest):
-    """Recognize EXP from image"""
-    try:
-        image = decode_base64_image(request.image_base64)
-        result = ocr_engine(image)
-        raw_text = extract_text_from_result(result)
-        
-        # Parse EXP format: "EXP 1,234,567 [12.34%]" or "1234567[12.34%]"
-        # Remove "EXP" prefix and spaces
-        cleaned = raw_text.replace("EXP", "").replace(" ", "").replace(",", "")
-        
-        # Extract absolute value and percentage
-        match = re.search(r'(\d+)\[?([\d.]+)%?\]?', cleaned)
-        if not match:
-            raise HTTPException(status_code=400, detail=f"Failed to parse EXP format: '{raw_text}'")
-        
-        absolute = int(match.group(1))
-        percentage = float(match.group(2))
-        
-        return ExpResponse(
-            absolute=absolute,
-            percentage=percentage,
-            raw_text=raw_text
-        )
-    
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Failed to parse EXP: {str(e)}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"OCR failed: {str(e)}")
-
-
-@app.post("/ocr/hp", response_model=HpMpResponse)
-async def recognize_hp(request: ImageRequest):
-    """Recognize HP from image"""
-    try:
-        image = decode_base64_image(request.image_base64)
-        result = ocr_engine(image)
-        raw_text = extract_text_from_result(result)
-        
-        # Extract digits only
-        digits = "".join(filter(str.isdigit, raw_text))
-        
-        if not digits:
-            raise HTTPException(status_code=400, detail=f"No digits found in HP image: '{raw_text}'")
-        
-        hp = int(digits)
-        
-        return HpMpResponse(
-            value=hp,
-            raw_text=raw_text
-        )
-    
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Failed to parse HP: {str(e)}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"OCR failed: {str(e)}")
-
-
-@app.post("/ocr/mp", response_model=HpMpResponse)
-async def recognize_mp(request: ImageRequest):
-    """Recognize MP from image"""
-    try:
-        image = decode_base64_image(request.image_base64)
-        result = ocr_engine(image)
-        raw_text = extract_text_from_result(result)
-        
-        # Extract digits only
-        digits = "".join(filter(str.isdigit, raw_text))
-        
-        if not digits:
-            raise HTTPException(status_code=400, detail=f"No digits found in MP image: '{raw_text}'")
-        
-        mp = int(digits)
-        
-        return HpMpResponse(
-            value=mp,
-            raw_text=raw_text
-        )
-    
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Failed to parse MP: {str(e)}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"OCR failed: {str(e)}")
+# OCR Endpoints - Legacy endpoints (not used, parsing done in Rust)
+# @app.post("/ocr/level", response_model=LevelResponse)
+# @app.post("/ocr/exp", response_model=ExpResponse)
+# @app.post("/ocr/hp", response_model=HpMpResponse)
+# @app.post("/ocr/mp", response_model=HpMpResponse)
 
 
 def _run_ocr_sync(image: np.ndarray) -> str:
     """Synchronous OCR function to run in thread pool"""
-    result = ocr_engine(image)
+    # Call with text_score=0.65 for lower detection threshold
+    result = ocr_engine(image, text_score=0.65)
     return extract_text_from_result(result)
 
 

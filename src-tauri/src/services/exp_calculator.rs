@@ -17,6 +17,9 @@ pub struct ExpCalculator {
     mp_potions_used: u32,
     max_hp: Option<u32>,  // Maximum HP for detecting recovery
     max_mp: Option<u32>,  // Maximum MP for detecting recovery
+    // Pending increase validation (value, consecutive_count)
+    pending_hp_increase: Option<(u32, u8)>,
+    pending_mp_increase: Option<(u32, u8)>,
 }
 
 impl ExpCalculator {
@@ -39,6 +42,8 @@ impl ExpCalculator {
             mp_potions_used: 0,
             max_hp: None,
             max_mp: None,
+            pending_hp_increase: None,
+            pending_mp_increase: None,
         })
     }
 
@@ -247,11 +252,40 @@ impl ExpCalculator {
                         last_count, current_count, used, self.hp_potions_used);
                 }
             } else if current_count > last_count {
-                // Potion count increased (shop purchase) - just update the count
-                #[cfg(debug_assertions)]
-                println!("🦀 [Calculator] HP potion purchased: {} -> {} (+{})",
-                    last_count, current_count, current_count - last_count);
-                self.last_hp = hp_potion_count;
+                // Potion count increased (shop purchase) - validate 5 times before accepting
+                match self.pending_hp_increase {
+                    Some((pending_val, count)) if pending_val == current_count => {
+                        // Same increased value - increment count
+                        if count + 1 >= 5 {
+                            // 5 consecutive verifications - accept as real increase
+                            #[cfg(debug_assertions)]
+                            println!("🦀 [Calculator] ✅ HP potion increase verified (5x): {} -> {} (+{})",
+                                last_count, current_count, current_count - last_count);
+                            self.last_hp = hp_potion_count;
+                            self.pending_hp_increase = None;
+                        } else {
+                            // Continue verification
+                            self.pending_hp_increase = Some((pending_val, count + 1));
+                            #[cfg(debug_assertions)]
+                            println!("🦀 [Calculator] 🔄 HP potion increase verification {}/5: {} -> {}",
+                                count + 1, last_count, current_count);
+                        }
+                    }
+                    _ => {
+                        // New increase value or different value - start verification
+                        self.pending_hp_increase = Some((current_count, 1));
+                        #[cfg(debug_assertions)]
+                        println!("🦀 [Calculator] 🔄 HP potion increase detected, starting verification 1/5: {} -> {}",
+                            last_count, current_count);
+                    }
+                }
+            } else {
+                // current_count == last_count - reset pending if exists
+                if self.pending_hp_increase.is_some() {
+                    #[cfg(debug_assertions)]
+                    println!("🦀 [Calculator] 🚫 HP potion increase verification cancelled (value reverted)");
+                    self.pending_hp_increase = None;
+                }
             }
             // If equal, no change - no update needed
         } else if hp_potion_count.is_some() {
@@ -284,11 +318,40 @@ impl ExpCalculator {
                         last_count, current_count, used, self.mp_potions_used);
                 }
             } else if current_count > last_count {
-                // Potion count increased (shop purchase) - just update the count
-                #[cfg(debug_assertions)]
-                println!("🦀 [Calculator] MP potion purchased: {} -> {} (+{})",
-                    last_count, current_count, current_count - last_count);
-                self.last_mp = mp_potion_count;
+                // Potion count increased (shop purchase) - validate 5 times before accepting
+                match self.pending_mp_increase {
+                    Some((pending_val, count)) if pending_val == current_count => {
+                        // Same increased value - increment count
+                        if count + 1 >= 5 {
+                            // 5 consecutive verifications - accept as real increase
+                            #[cfg(debug_assertions)]
+                            println!("🦀 [Calculator] ✅ MP potion increase verified (5x): {} -> {} (+{})",
+                                last_count, current_count, current_count - last_count);
+                            self.last_mp = mp_potion_count;
+                            self.pending_mp_increase = None;
+                        } else {
+                            // Continue verification
+                            self.pending_mp_increase = Some((pending_val, count + 1));
+                            #[cfg(debug_assertions)]
+                            println!("🦀 [Calculator] 🔄 MP potion increase verification {}/5: {} -> {}",
+                                count + 1, last_count, current_count);
+                        }
+                    }
+                    _ => {
+                        // New increase value or different value - start verification
+                        self.pending_mp_increase = Some((current_count, 1));
+                        #[cfg(debug_assertions)]
+                        println!("🦀 [Calculator] 🔄 MP potion increase detected, starting verification 1/5: {} -> {}",
+                            last_count, current_count);
+                    }
+                }
+            } else {
+                // current_count == last_count - reset pending if exists
+                if self.pending_mp_increase.is_some() {
+                    #[cfg(debug_assertions)]
+                    println!("🦀 [Calculator] 🚫 MP potion increase verification cancelled (value reverted)");
+                    self.pending_mp_increase = None;
+                }
             }
             // If equal, no change - no update needed
         } else if mp_potion_count.is_some() {
@@ -315,6 +378,8 @@ impl ExpCalculator {
         self.mp_potions_used = 0;
         self.max_hp = None;
         self.max_mp = None;
+        self.pending_hp_increase = None;
+        self.pending_mp_increase = None;
     }
 
     #[cfg(test)]
