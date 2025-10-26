@@ -93,21 +93,21 @@ export function HistoryDashboard({ isOpen, onClose }: HistoryDashboardProps) {
           {/* Statistics Overview */}
           <div className="stats-overview">
             {showSessionCount && (
-              <div className="stat-card">
+              <div className="history-stat-card">
                 <div className="stat-label">총 세션</div>
                 <div className="stat-value">{totalSessions}</div>
               </div>
             )}
 
             {showTotalTime && (
-              <div className="stat-card">
+              <div className="history-stat-card">
                 <div className="stat-label">총 사냥 시간</div>
                 <div className="stat-value">{formatTime(totalTime)}</div>
               </div>
             )}
 
             {totalSessions > 0 && (
-              <div className="stat-card">
+              <div className="history-stat-card">
                 <div className="stat-label">평균 세션 시간</div>
                 <div className="stat-value">{formatTime(avgDuration)}</div>
               </div>
@@ -135,9 +135,6 @@ export function HistoryDashboard({ isOpen, onClose }: HistoryDashboardProps) {
                 <div className="average-value">{calculateAverage(60)}</div>
               </div>
             </div>
-            <p className="averages-note">
-              * OCR 구현 후 실제 경험치 데이터가 표시됩니다
-            </p>
           </div>
 
           {/* Recent Sessions List */}

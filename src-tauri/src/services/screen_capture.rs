@@ -52,10 +52,14 @@ impl ScreenCapture {
         // Convert RgbaImage to DynamicImage
         let image = DynamicImage::ImageRgba8(rgba_image);
 
+        // macOS menubar offset (30px in logical coordinates, 60px on Retina)
+        let menubar_offset = 30;
+
         // Apply scale factor to convert logical coordinates to physical pixels
         // On macOS Retina (scale_factor = 2.0), logical 1920x1080 → physical 3840x2160
+        // Add menubar offset to y coordinate
         let physical_x = (roi.x as f64 * self.scale_factor) as u32;
-        let physical_y = (roi.y as f64 * self.scale_factor) as u32;
+        let physical_y = ((roi.y + menubar_offset) as f64 * self.scale_factor) as u32;
         let physical_width = (roi.width as f64 * self.scale_factor) as u32;
         let physical_height = (roi.height as f64 * self.scale_factor) as u32;
 

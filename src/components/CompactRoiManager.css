@@ -4,8 +4,8 @@
 }
 
 .roi-buttons {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
   gap: 8px;
 }
 
@@ -43,6 +43,12 @@
 
 .roi-icon {
   font-size: 16px;
+}
+
+.roi-icon-img {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
 }
 
 .roi-label {

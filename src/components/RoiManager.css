@@ -1,7 +1,7 @@
 .roi-manager {
   padding: 16px;
   width: 100%;
-  max-width: 550px;
+  max-width: 700px;
   margin: 0 auto;
   box-sizing: border-box;
 }
@@ -25,8 +25,8 @@
 }
 
 .roi-grid {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
   gap: 12px;
 }
 

@@ -1,23 +1,25 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "exp-tracker-temp",
+  "productName": "exp-tracker",
   "version": "0.1.0",
-  "identifier": "com.danny.exp-tracker-temp",
+  "identifier": "com.danny.exp-tracker",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run icon:generate && npm run build",
+    "beforeBuildCommand": "bash scripts/build_python_server.sh && npm run icon:generate && npm run build",
     "frontendDist": "../dist"
   },
   "app": {
     "macOSPrivateApi": true,
     "windows": [
       {
-        "title": "exp-tracker-temp",
-        "width": 550,
+        "title": "exp-tracker",
+        "width": 480,
         "height": 300,
-        "minWidth": 550,
+        "minWidth": 480,
         "minHeight": 300,
+        "maxWidth": 480,
+        "maxHeight": 300,
         "resizable": true,
         "transparent": true,
         "decorations": false,
@@ -56,13 +58,22 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["app"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "resources": [
+      "resources/ocr_server/*",
+      "resources/ocr_server/**/*"
+    ],
+    "macOS": {
+      "entitlements": "entitlements.plist",
+      "signingIdentity": null,
+      "providerShortName": null
+    }
   }
 }

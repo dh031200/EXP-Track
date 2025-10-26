@@ -51,3 +51,34 @@ Thumbs.db
 
 # Development documentation
 devdocs/
+icons/
+legacy/
+.serena/
+.venv/
+scripts/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+python_ocr_server/build/
+python_ocr_server/dist/
+*.egg-info/
+
+# PyInstaller build outputs
+src-tauri/resources/ocr_server/
+src-tauri/resources/paddleocr/
+
+# Rust vendor and cargo config
+src-tauri/vendor/
+src-tauri/.cargo/
+
+# Test files
+test_*.py
+*_test.py
+
+# External library clones
+rapid/
+rapidocr/

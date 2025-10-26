@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useTimerSettingsStore, AverageInterval, AutoStopInterval } from '../stores/timerSettingsStore';
+import { useTimerSettingsStore, AverageInterval, AutoStopInterval, AverageCalculationMode } from '../stores/timerSettingsStore';
 import './TimerSettingsModal.css';
 
 interface TimerSettingsModalProps {
@@ -13,10 +13,12 @@ export function TimerSettingsModal({ isOpen, onClose }: TimerSettingsModalProps)
   const {
     selectedAverageInterval,
     autoStopInterval,
+    averageCalculationMode,
     showTotalTime,
     showSessionCount,
     setAverageInterval,
     setAutoStopInterval,
+    setAverageCalculationMode,
     toggleTotalTime,
     toggleSessionCount,
     resetToDefaults,
@@ -58,6 +60,17 @@ export function TimerSettingsModal({ isOpen, onClose }: TimerSettingsModalProps)
                     onChange={() => setAverageInterval('none')}
                   />
                   <span>안함</span>
+                </label>
+
+                <label className={`interval-option ${selectedAverageInterval === '1min' ? 'selected' : ''}`}>
+                  <input
+                    type="radio"
+                    name="averageInterval"
+                    value="1min"
+                    checked={selectedAverageInterval === '1min'}
+                    onChange={() => setAverageInterval('1min')}
+                  />
+                  <span>1분</span>
                 </label>
 
                 <label className={`interval-option ${selectedAverageInterval === '5min' ? 'selected' : ''}`}>
@@ -173,6 +186,45 @@ export function TimerSettingsModal({ isOpen, onClose }: TimerSettingsModalProps)
             </div>
           )}
 
+          {currentPage === 2 && (
+            <div className="settings-section">
+              <h3 className="settings-section-title">평균 계산 방식</h3>
+              <p className="settings-section-desc">
+                평균 경험치 계산 방식을 선택하세요
+              </p>
+
+              <div className="interval-options">
+                <label className={`interval-option ${averageCalculationMode === 'prediction' ? 'selected' : ''}`}>
+                  <input
+                    type="radio"
+                    name="calculationMode"
+                    value="prediction"
+                    checked={averageCalculationMode === 'prediction'}
+                    onChange={() => setAverageCalculationMode('prediction')}
+                  />
+                  <div className="option-content">
+                    <span className="option-title">[예상] 경험치</span>
+                    <span className="option-desc">초반 데이터로 예측</span>
+                  </div>
+                </label>
+
+                <label className={`interval-option ${averageCalculationMode === 'per_interval' ? 'selected' : ''}`}>
+                  <input
+                    type="radio"
+                    name="calculationMode"
+                    value="per_interval"
+                    checked={averageCalculationMode === 'per_interval'}
+                    onChange={() => setAverageCalculationMode('per_interval')}
+                  />
+                  <div className="option-content">
+                    <span className="option-title">[분당] 경험치</span>
+                    <span className="option-desc">최근 N분 실제 데이터</span>
+                  </div>
+                </label>
+              </div>
+            </div>
+          )}
+
           <div className="pagination-dots">
             <span
               className={currentPage === 0 ? 'active' : ''}
@@ -181,6 +233,10 @@ export function TimerSettingsModal({ isOpen, onClose }: TimerSettingsModalProps)
             <span
               className={currentPage === 1 ? 'active' : ''}
               onClick={() => setCurrentPage(1)}
+            />
+            <span
+              className={currentPage === 2 ? 'active' : ''}
+              onClick={() => setCurrentPage(2)}
             />
           </div>
         </div>

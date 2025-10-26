@@ -4,11 +4,15 @@ import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { RoiConfigModal } from "./components/RoiConfigModal";
 import { Settings } from "./components/Settings";
 import { TimerSettingsModal } from "./components/TimerSettingsModal";
+import { ExpTrackerDisplay } from "./components/ExpTrackerDisplay";
 import { useSettingsStore } from "./stores/settingsStore";
 import { useRoiStore } from "./stores/roiStore";
 import { useTrackingStore } from "./stores/trackingStore";
 import { useSessionStore } from "./stores/sessionStore";
 import { useTimerSettingsStore } from "./stores/timerSettingsStore";
+import { useParallelOcrTracker } from "./hooks/useParallelOcrTracker";
+import { initScreenCapture } from "./lib/tauri";
+import { checkOcrHealth } from "./lib/ocrCommands";
 import "./App.css";
 
 // Import icons
@@ -25,9 +29,18 @@ function App() {
   const [showRoiModal, setShowRoiModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showTimerSettings, setShowTimerSettings] = useState(false);
+  
+  // Timestamped EXP data for per-interval calculation and history
+  const [expDataPoints, setExpDataPoints] = useState<Array<{
+    timestamp: number;
+    totalExp: number;
+    hpPotions: number;
+    mpPotions: number;
+  }>>([]);
+  const [ocrHealthy, setOcrHealthy] = useState(false);
 
   const backgroundOpacity = useSettingsStore((state) => state.backgroundOpacity);
-  const { levelRoi, expRoi, mapLocationRoi } = useRoiStore(); // mesoRoi commented out
+  const { levelRoi, expRoi } = useRoiStore();
   const {
     state: trackingState,
     elapsedSeconds,
@@ -36,7 +49,6 @@ function App() {
     pauseTracking,
     resetTracking,
     incrementTimer,
-    getActiveDuration
   } = useTrackingStore();
 
   const {
@@ -46,10 +58,52 @@ function App() {
     updateSessionDuration,
   } = useSessionStore();
 
-  const { selectedAverageInterval } = useTimerSettingsStore();
+  const { selectedAverageInterval, averageCalculationMode } = useTimerSettingsStore();
+
+  // Parallel OCR Tracker hook
+  const parallelOcrTracker = useParallelOcrTracker();
 
   // Check if any ROI is configured
-  const hasAnyRoi = levelRoi !== null || expRoi !== null || mapLocationRoi !== null;
+  const hasAnyRoi = levelRoi !== null || expRoi !== null;
+
+  // Initialize screen capture on app start
+  useEffect(() => {
+    const initCapture = async () => {
+      try {
+        await initScreenCapture();
+        console.log('Screen capture initialized successfully');
+      } catch (error) {
+        console.error('Failed to initialize screen capture:', error);
+      }
+    };
+
+    initCapture();
+  }, []); // Run only once on mount
+
+  // OCR health check polling - check every 3 seconds until healthy
+  useEffect(() => {
+    const checkHealth = async () => {
+      try {
+        const healthy = await checkOcrHealth();
+        setOcrHealthy(healthy);
+      } catch (error) {
+        console.error('OCR health check failed:', error);
+        setOcrHealthy(false);
+      }
+    };
+
+    // Initial check
+    checkHealth();
+
+    // Poll every 3 seconds if not healthy
+    const interval = setInterval(() => {
+      if (!ocrHealthy) {
+        checkHealth();
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [ocrHealthy]);
 
   // Timer effect - increment every second when tracking
   useEffect(() => {
@@ -57,12 +111,39 @@ function App() {
       const interval = setInterval(() => {
         incrementTimer();
         // Update current session duration
-        const activeDuration = getActiveDuration();
         updateSessionDuration(elapsedSeconds + 1, pausedSeconds);
       }, 1000);
       return () => clearInterval(interval);
     }
-  }, [trackingState, incrementTimer, elapsedSeconds, pausedSeconds, getActiveDuration, updateSessionDuration]);
+  }, [trackingState, incrementTimer, elapsedSeconds, pausedSeconds, updateSessionDuration]);
+
+  // Record EXP data points every minute for per-interval calculation
+  useEffect(() => {
+    if (trackingState === 'tracking' && parallelOcrTracker.stats) {
+      const interval = setInterval(() => {
+        const now = Date.now();
+        const totalExp = parallelOcrTracker.stats?.total_exp || 0;
+        
+        setExpDataPoints(prev => {
+          const hpPotions = parallelOcrTracker.stats?.hp_potions_used || 0;
+          const mpPotions = parallelOcrTracker.stats?.mp_potions_used || 0;
+          const newPoints = [...prev, { timestamp: now, totalExp, hpPotions, mpPotions }];
+          // Keep only last 24 hours of data (for history graphs)
+          const cutoffTime = now - 24 * 60 * 60 * 1000;
+          return newPoints.filter(point => point.timestamp > cutoffTime);
+        });
+      }, 60000); // Every 1 minute
+      
+      return () => clearInterval(interval);
+    }
+  }, [trackingState, parallelOcrTracker.stats]);
+
+  // Reset data points when tracking is reset
+  useEffect(() => {
+    if (trackingState === 'idle') {
+      setExpDataPoints([]);
+    }
+  }, [trackingState]);
 
   // Format elapsed seconds as HH:MM:SS
   const formatTime = (seconds: number): string => {
@@ -74,11 +155,13 @@ function App() {
 
   // Calculate average exp for selected interval
   const calculateAverage = (): { label: string; value: string } | null => {
-    if (selectedAverageInterval === 'none' || sessions.length === 0) {
+    if (selectedAverageInterval === 'none' || !parallelOcrTracker.stats) {
       return null;
     }
 
     const intervalMinutes = {
+      'none': 0,
+      '1min': 1,
       '5min': 5,
       '10min': 10,
       '30min': 30,
@@ -86,33 +169,146 @@ function App() {
     }[selectedAverageInterval] || 0;
 
     const intervalLabel = {
+      '1min': '1분',
       '5min': '5분',
       '10min': '10분',
       '30min': '30분',
-      '1hour': '1시간',
+      '1hour': '시간',
     }[selectedAverageInterval] || '';
 
+    const stats = parallelOcrTracker.stats;
     const intervalSeconds = intervalMinutes * 60;
-    const totalExp = sessions.reduce((sum, s) => sum + (s.expGained || 0), 0);
-    const totalDuration = sessions.reduce((sum, s) => sum + s.duration, 0);
 
-    if (totalDuration === 0) {
+    // Use real-time stats from OCR tracker
+    if (!stats || stats.elapsed_seconds === 0) {
       return { label: intervalLabel, value: '0' };
     }
 
-    const expPerSecond = totalExp / totalDuration;
-    const avgExp = Math.floor(expPerSecond * intervalSeconds);
+    // Prediction mode: Use first 1/10 of interval to predict full interval
+    // [예상] 경험치: 기준 시간의 1/10 동안 얻은 경험치로 전체 예측
+    if (averageCalculationMode === 'prediction') {
+      const predictionWindow = intervalSeconds / 10; // 1/10 of interval
+      
+      if (stats.elapsed_seconds < predictionWindow) {
+        // Not enough data yet, show current rate
+        const expPerSecond = stats.total_exp / stats.elapsed_seconds;
+        const avgExp = Math.floor(expPerSecond * intervalSeconds);
+        return { label: `${intervalLabel} (예상)`, value: avgExp.toLocaleString('ko-KR') };
+      }
+      
+      // Use data from prediction window to predict full interval
+      const now = Date.now();
+      const windowStart = now - (predictionWindow * 1000);
+      
+      // Find closest data point to window start
+      const relevantPoints = expDataPoints.filter(p => p.timestamp >= windowStart);
+      
+      if (relevantPoints.length >= 2) {
+        const firstPoint = relevantPoints[0];
+        const lastPoint = relevantPoints[relevantPoints.length - 1];
+        const expGained = lastPoint.totalExp - firstPoint.totalExp;
+        const timeElapsed = (lastPoint.timestamp - firstPoint.timestamp) / 1000;
+        
+        if (timeElapsed > 0) {
+          const expPerSecond = expGained / timeElapsed;
+          const avgExp = Math.floor(expPerSecond * intervalSeconds);
+          return { label: `${intervalLabel} (예상)`, value: avgExp.toLocaleString('ko-KR') };
+        }
+      }
+      
+      // Fallback to current rate if not enough data points
+      const expPerSecond = stats.total_exp / stats.elapsed_seconds;
+      const avgExp = Math.floor(expPerSecond * intervalSeconds);
+      return { label: `${intervalLabel} (예상)`, value: avgExp.toLocaleString('ko-KR') };
+    }
 
-    return { label: intervalLabel, value: avgExp.toLocaleString() };
+    // Per-interval mode: Actual EXP gained in recent N minutes
+    // [분당] 경험치: 최근 N분 동안 실제로 얻은 경험치
+    const now = Date.now();
+    const windowStart = now - (intervalSeconds * 1000);
+    
+    // Filter data points within the interval
+    const relevantPoints = expDataPoints.filter(p => p.timestamp >= windowStart);
+    
+    if (relevantPoints.length >= 2) {
+      const firstPoint = relevantPoints[0];
+      const lastPoint = relevantPoints[relevantPoints.length - 1];
+      const expGained = lastPoint.totalExp - firstPoint.totalExp;
+      
+      return { label: intervalLabel, value: expGained.toLocaleString('ko-KR') };
+    }
+    
+    // Not enough data points, use current average
+    const cappedSeconds = Math.min(stats.elapsed_seconds, intervalSeconds);
+    const expPerSecond = stats.total_exp / stats.elapsed_seconds;
+    const avgExp = Math.floor(expPerSecond * cappedSeconds);
+    return { label: intervalLabel, value: avgExp.toLocaleString('ko-KR') };
   };
 
   const averageData = calculateAverage();
+
+  // Calculate HP/MP potion usage per minute (based on recent interval)
+  const calculatePotionUsage = (): { hpPerMinute: number; mpPerMinute: number } => {
+    const stats = parallelOcrTracker.stats;
+    if (!stats || stats.elapsed_seconds === 0) {
+      return { hpPerMinute: 0, mpPerMinute: 0 };
+    }
+
+    const intervalMinutes = {
+      'none': 0,
+      '1min': 1,
+      '5min': 5,
+      '10min': 10,
+      '30min': 30,
+      '1hour': 60,
+    }[selectedAverageInterval] || 0;
+    const intervalSeconds = intervalMinutes * 60;
+    const now = Date.now();
+    const windowStart = now - (intervalSeconds * 1000);
+
+    // Filter data points within the interval
+    const relevantPoints = expDataPoints.filter(p => p.timestamp >= windowStart);
+
+    if (relevantPoints.length >= 2) {
+      const firstPoint = relevantPoints[0];
+      const lastPoint = relevantPoints[relevantPoints.length - 1];
+      const hpUsed = lastPoint.hpPotions - firstPoint.hpPotions;
+      const mpUsed = lastPoint.mpPotions - firstPoint.mpPotions;
+      const timeElapsed = (lastPoint.timestamp - firstPoint.timestamp) / 1000 / 60; // in minutes
+
+      if (timeElapsed > 0) {
+        return {
+          hpPerMinute: hpUsed / timeElapsed,
+          mpPerMinute: mpUsed / timeElapsed,
+        };
+      }
+    }
+
+    // Not enough data points, use total average
+    const elapsedMinutes = stats.elapsed_seconds / 60;
+    return {
+      hpPerMinute: elapsedMinutes > 0 ? stats.hp_potions_used / elapsedMinutes : 0,
+      mpPerMinute: elapsedMinutes > 0 ? stats.mp_potions_used / elapsedMinutes : 0,
+    };
+  };
+
+  const potionUsage = calculatePotionUsage();
+
+  // Get interval label for display
+  const intervalLabel = {
+    'none': '시간',
+    '1min': '1분',
+    '5min': '5분',
+    '10min': '10분',
+    '30min': '30분',
+    '1hour': '시간',
+  }[selectedAverageInterval] || '시간';
 
   const handleSelectingChange = useCallback((selecting: boolean) => {
     setIsSelecting(selecting);
   }, []);
 
-  const handleToggleTracking = () => {
+  const handleToggleTracking = async () => {
     if (!hasAnyRoi) {
       setShowRoiModal(true);
       return;
@@ -122,25 +318,29 @@ function App() {
       // Start new session
       startSession();
       startTracking();
-      // TODO: Start OCR and exp recording
+      // Start OCR and exp recording
+      await parallelOcrTracker.start();
     } else if (trackingState === 'paused') {
       // Resume tracking
       startTracking();
-      // TODO: Resume OCR and exp recording
+      // Resume OCR and exp recording
+      await parallelOcrTracker.start();
     } else if (trackingState === 'tracking') {
       // Pause tracking
       pauseTracking();
-      // TODO: Pause OCR and exp recording
+      // Pause OCR and exp recording
+      parallelOcrTracker.stop();
     }
   };
 
-  const handleReset = () => {
+  const handleReset = async () => {
     if (trackingState !== 'idle') {
       // Save session to history before resetting
       endSession();
     }
     resetTracking();
-    // TODO: Clear exp data and reset to initial state
+    // Clear exp data and reset to initial state
+    await parallelOcrTracker.reset();
   };
 
   const handleClose = async () => {
@@ -163,7 +363,7 @@ function App() {
     // Check if window already exists (getByLabel is async in Tauri 2.x)
     const existingWindow = await WebviewWindow.getByLabel('history');
     if (existingWindow) {
-      await existingWindow.focus(); // use focus() instead of setFocus() in Tauri 2.x
+      await existingWindow.setFocus();
       return;
     }
 
@@ -222,7 +422,7 @@ function App() {
             borderTopLeftRadius: '12px',
             borderTopRightRadius: '12px',
             borderBottom: '1px solid rgba(0, 0, 0, 0.08)',
-            cursor: 'grab',
+            cursor: 'move',
             userSelect: 'none',
           }}
         >
@@ -313,7 +513,7 @@ function App() {
       <main className="container" style={{
         background: isSelecting ? 'transparent' : 'rgba(255, 255, 255, 0.98)',
         marginTop: isSelecting ? '0' : '44px',
-        padding: isSelecting ? '0' : '16px',
+        padding: isSelecting ? '0' : '8px 16px 30px 16px', /* top right bottom left - reduced top padding */
         height: isSelecting ? '100%' : 'calc(100% - 44px)',
         borderBottomLeftRadius: isSelecting ? '0' : '12px',
         borderBottomRightRadius: isSelecting ? '0' : '12px',
@@ -322,11 +522,39 @@ function App() {
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        justifyContent: 'center',
-        gap: '12px'
+        justifyContent: 'flex-start', /* Align to top instead of center */
+        gap: '2px', /* Minimal gap between sections */
+        paddingTop: '20px', /* Add top padding to push content down from titlebar */
+        position: 'relative'
       }}>
         {!isSelecting && !showSettings && (
           <>
+            {/* OCR Status Indicator - Top Left of main container */}
+            {(
+              <div style={{
+                position: 'absolute',
+                top: '12px',
+                left: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '3px',
+                padding: '3px 6px',
+                background: 'rgba(0, 0, 0, 0.02)',
+                borderRadius: '4px',
+                zIndex: 10
+              }}>
+                <span style={{ fontSize: '10px', lineHeight: 1 }}>
+                  {ocrHealthy ? '🟢' : '🔴'}
+                </span>
+                <span style={{
+                  fontSize: '9px',
+                  fontWeight: 600,
+                  color: '#666',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px'
+                }}>OCR</span>
+              </div>
+            )}
             {/* Central controls: Start/Pause toggle + Timer */}
             <div style={{
               display: 'flex',
@@ -337,7 +565,7 @@ function App() {
               {/* Start/Pause Toggle Button */}
               <button
                 onClick={handleToggleTracking}
-                disabled={!hasAnyRoi}
+                disabled={!hasAnyRoi || !ocrHealthy}
                 style={{
                   width: '64px',
                   height: '64px',
@@ -378,9 +606,9 @@ function App() {
                 />
               </button>
 
-              {/* Timer Display - Much Larger */}
+              {/* Timer Display - Compact Size */}
               <div style={{
-                fontSize: '56px',
+                fontSize: '32px',
                 fontWeight: '700',
                 color: trackingState === 'tracking' ? '#4CAF50' : '#666',
                 fontFamily: 'monospace',
@@ -391,46 +619,25 @@ function App() {
               </div>
             </div>
 
-            {/* Status text */}
+
+            {/* EXP Tracker Display - Always visible for better UX */}
             <div style={{
-              fontSize: '12px',
-              color: !hasAnyRoi ? '#FF9800' : trackingState === 'tracking' ? '#4CAF50' : '#666',
-              fontWeight: '500',
-              textAlign: 'center',
-              marginTop: '8px'
+              width: '100%',
+              maxWidth: '400px',
+              marginTop: '8px' /* Spacing between timer and cards */
             }}>
-              {!hasAnyRoi ? 'ROI 설정 필요' : trackingState === 'tracking' ? '추적 중...' : trackingState === 'paused' ? '일시정지됨' : '준비됨'}
+              <ExpTrackerDisplay
+                stats={parallelOcrTracker.stats}
+                isTracking={parallelOcrTracker.isRunning()}
+                error={null}
+                averageData={calculateAverage()}
+                calculationMode={averageCalculationMode}
+                intervalLabel={intervalLabel}
+                potionUsage={potionUsage}
+              />
             </div>
 
-            {/* Average EXP Display */}
-            {averageData && (
-              <div style={{
-                marginTop: '4px',
-                padding: '6px 12px',
-                background: 'rgba(102, 126, 234, 0.08)',
-                border: '1px solid rgba(102, 126, 234, 0.2)',
-                borderRadius: '6px',
-                display: 'inline-block'
-              }}>
-                <div style={{
-                  fontSize: '10px',
-                  color: '#667eea',
-                  fontWeight: '600',
-                  marginBottom: '2px',
-                  letterSpacing: '0.5px'
-                }}>
-                  평균 ({averageData.label})
-                </div>
-                <div style={{
-                  fontSize: '14px',
-                  color: '#667eea',
-                  fontWeight: '700',
-                  fontFamily: 'monospace'
-                }}>
-                  {averageData.value} 경험치
-                </div>
-              </div>
-            )}
+            {/* Average EXP Display removed - now integrated into ExpTrackerDisplay */}
 
             {/* Bottom-left reset button */}
             <div style={{
@@ -442,9 +649,9 @@ function App() {
                 onClick={handleReset}
                 disabled={trackingState === 'idle'}
                 style={{
-                  width: '48px',
-                  height: '48px',
-                  borderRadius: '8px',
+                  width: '30px',
+                  height: '30px',
+                  borderRadius: '6px',
                   border: '1px solid rgba(0, 0, 0, 0.1)',
                   background: 'rgba(0, 0, 0, 0.05)',
                   cursor: trackingState !== 'idle' ? 'pointer' : 'not-allowed',
@@ -470,7 +677,7 @@ function App() {
                 <img
                   src={resetIcon}
                   alt="Reset"
-                  style={{ width: '24px', height: '24px' }}
+                  style={{ width: '20px', height: '20px' }}
                 />
               </button>
             </div>
@@ -486,11 +693,11 @@ function App() {
               <button
                 onClick={() => setShowTimerSettings(true)}
                 style={{
-                  width: '40px',
-                  height: '40px',
+                  width: '30px',
+                  height: '30px',
                   background: 'rgba(0, 0, 0, 0.05)',
                   border: '1px solid rgba(0, 0, 0, 0.1)',
-                  borderRadius: '8px',
+                  borderRadius: '6px',
                   cursor: 'pointer',
                   transition: 'all 0.15s ease',
                   padding: 0,
@@ -508,43 +715,37 @@ function App() {
                 }}
                 title="타이머 설정"
               >
-                <img src={timerIcon} alt="Timer" style={{ width: '24px', height: '24px' }} />
+                <img src={timerIcon} alt="Timer" style={{ width: '20px', height: '20px' }} />
               </button>
               <button
                 onClick={handleOpenHistory}
+                disabled={true}
                 style={{
-                  width: '40px',
-                  height: '40px',
-                  background: 'rgba(0, 0, 0, 0.05)',
-                  border: '1px solid rgba(0, 0, 0, 0.1)',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
+                  width: '30px',
+                  height: '30px',
+                  background: 'rgba(0, 0, 0, 0.03)',
+                  border: '1px solid rgba(0, 0, 0, 0.05)',
+                  borderRadius: '6px',
+                  cursor: 'not-allowed',
                   transition: 'all 0.15s ease',
                   padding: 0,
                   display: 'flex',
                   alignItems: 'center',
-                  justifyContent: 'center'
+                  justifyContent: 'center',
+                  opacity: 0.4
                 }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'rgba(0, 0, 0, 0.08)';
-                  e.currentTarget.style.transform = 'scale(1.05)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'rgba(0, 0, 0, 0.05)';
-                  e.currentTarget.style.transform = 'scale(1)';
-                }}
-                title="히스토리"
+                title="히스토리 (준비 중)"
               >
-                <img src={historyIcon} alt="History" style={{ width: '24px', height: '24px' }} />
+                <img src={historyIcon} alt="History" style={{ width: '20px', height: '20px' }} />
               </button>
               <button
                 onClick={() => setShowRoiModal(true)}
                 style={{
-                  width: '40px',
-                  height: '40px',
+                  width: '30px',
+                  height: '30px',
                   background: 'rgba(0, 0, 0, 0.05)',
                   border: '1px solid rgba(0, 0, 0, 0.1)',
-                  borderRadius: '8px',
+                  borderRadius: '6px',
                   cursor: 'pointer',
                   transition: 'all 0.15s ease',
                   padding: 0,
@@ -562,16 +763,16 @@ function App() {
                 }}
                 title="ROI 설정"
               >
-                <img src={roiIcon} alt="ROI" style={{ width: '24px', height: '24px' }} />
+                <img src={roiIcon} alt="ROI" style={{ width: '20px', height: '20px' }} />
               </button>
               <button
                 onClick={() => setShowSettings(true)}
                 style={{
-                  width: '40px',
-                  height: '40px',
+                  width: '30px',
+                  height: '30px',
                   background: 'rgba(0, 0, 0, 0.05)',
                   border: '1px solid rgba(0, 0, 0, 0.1)',
-                  borderRadius: '8px',
+                  borderRadius: '6px',
                   cursor: 'pointer',
                   transition: 'all 0.15s ease',
                   padding: 0,
@@ -589,7 +790,7 @@ function App() {
                 }}
                 title="설정"
               >
-                <img src={settingIcon} alt="Settings" style={{ width: '24px', height: '24px' }} />
+                <img src={settingIcon} alt="Settings" style={{ width: '20px', height: '20px' }} />
               </button>
             </div>
           </>

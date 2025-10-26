@@ -14,6 +14,12 @@ import { useRoiStore, type RoiType } from '../stores/roiStore';
 import { invoke } from '@tauri-apps/api/core';
 import './CompactRoiManager.css';
 
+// Import icons
+import lvIcon from '/icons/lv.png';
+import hpIcon from '/icons/hp.png';
+import expIcon from '/icons/exp.png';
+import mpIcon from '/icons/mp.png';
+
 interface WindowState {
   width: number;
   height: number;
@@ -26,9 +32,11 @@ interface CompactRoiManagerProps {
 }
 
 const ROI_CONFIGS = [
-  { type: 'level' as RoiType, label: 'Level', icon: '📊', color: '#4CAF50' },
-  { type: 'exp' as RoiType, label: 'EXP', icon: '📈', color: '#2196F3' },
-  { type: 'mapLocation' as RoiType, label: 'Map', icon: '🗺️', color: '#9C27B0' },
+  { type: 'level' as RoiType, label: 'Level', icon: lvIcon, color: '#4CAF50' },
+  { type: 'hp' as RoiType, label: 'HP', icon: hpIcon, color: '#F44336' },
+  { type: 'exp' as RoiType, label: 'EXP', icon: expIcon, color: '#2196F3' },
+  { type: 'mp' as RoiType, label: 'MP', icon: mpIcon, color: '#9C27B0' },
+  // { type: 'mapLocation' as RoiType, label: 'Map', icon: '🗺️', color: '#9C27B0' }, // Commented out temporarily
   // { type: 'meso' as RoiType, label: 'Meso', icon: '💰', color: '#FF9800' }, // Commented out temporarily
 ];
 
@@ -38,7 +46,7 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
   const [isInitialized, setIsInitialized] = useState(false);
   const windowStateRef = useRef<WindowState | null>(null);
 
-  const { levelRoi, expRoi, mapLocationRoi, setRoi, removeRoi, loadAllRois } = useRoiStore(); // mesoRoi commented out
+  const { levelRoi, expRoi, hpRoi, mpRoi, setRoi, removeRoi, loadAllRois } = useRoiStore();
 
   useEffect(() => {
     const init = async () => {
@@ -53,8 +61,9 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
     switch (type) {
       case 'level': return levelRoi;
       case 'exp': return expRoi;
-      case 'mapLocation': return mapLocationRoi;
-      // case 'meso': return mesoRoi; // Commented out temporarily
+      case 'hp': return hpRoi;
+      case 'mp': return mpRoi;
+      // case 'mapLocation': return mapLocationRoi; // Commented out temporarily
     }
   };
 
@@ -153,7 +162,7 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
                   style={{ borderColor: color }}
                   title={`${label} 영역 ${isConfigured ? '재' : ''}선택`}
                 >
-                  <span className="roi-icon">{icon}</span>
+                  <img src={icon} alt={label} className="roi-icon-img" />
                   <span className="roi-label">{label}</span>
                   {isConfigured && <span className="roi-check">✓</span>}
                 </button>

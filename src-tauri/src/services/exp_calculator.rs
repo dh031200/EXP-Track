@@ -5,9 +5,10 @@ pub struct ExpCalculator {
     level_table: LevelExpTable,
     initial_data: Option<ExpData>,
     last_data: Option<ExpData>,
-    start_time: Option<Instant>,
-    completed_levels_exp: u64,
-    completed_levels_percentage: f64,
+    pub start_time: Option<Instant>,
+    start_level: u32,  // Original starting level (never changes after session start)
+    pub completed_levels_exp: u64,
+    pub completed_levels_percentage: f64,
     paused_duration: Duration,
 }
 
@@ -21,6 +22,7 @@ impl ExpCalculator {
             initial_data: None,
             last_data: None,
             start_time: None,
+            start_level: 0,
             completed_levels_exp: 0,
             completed_levels_percentage: 0.0,
             paused_duration: Duration::ZERO,
@@ -29,6 +31,9 @@ impl ExpCalculator {
 
     /// Start tracking with initial data
     pub fn start(&mut self, data: ExpData) {
+        #[cfg(debug_assertions)]
+        println!("🦀 [Calculator] Session started: level={}, exp={}, percentage={}", data.level, data.exp, data.percentage);
+        self.start_level = data.level;  // Save original starting level
         self.initial_data = Some(data.clone());
         self.last_data = Some(data);
         self.start_time = Some(Instant::now());
@@ -39,11 +44,51 @@ impl ExpCalculator {
 
     /// Update with new data and calculate statistics
     pub fn update(&mut self, data: ExpData) -> Result<ExpStats, String> {
+        #[cfg(debug_assertions)]
+        println!("🦀 [Calculator] update() called: level={}, exp={}, percentage={}", data.level, data.exp, data.percentage);
+
         let initial = self
             .initial_data
             .as_ref()
             .ok_or("Calculator not started")?;
-        let last = self.last_data.as_ref().ok_or("No previous data")?;
+
+        // Clone last_data early to avoid borrow conflicts
+        let last = self.last_data.as_ref().ok_or("No previous data")?.clone();
+
+        #[cfg(debug_assertions)]
+        {
+            println!("🦀 [Calculator] initial_data: level={}, exp={}, percentage={}", initial.level, initial.exp, initial.percentage);
+            println!("🦀 [Calculator] last_data: level={}, exp={}, percentage={}", last.level, last.exp, last.percentage);
+        }
+
+        // Detect OCR errors: if exp change is unrealistic (>10x or <0.1x from last reading)
+        // This handles cases where OCR misreads digits (e.g., bracket '[' becomes '1')
+        if data.level == initial.level {
+            // Check against LAST reading (not initial) for better accuracy
+            if let Some(ref last) = self.last_data {
+                if last.level == data.level && last.exp > 0 {
+                    let ratio = data.exp as f64 / last.exp as f64;
+
+                    // Detect both explosions (ratio > 10) and drops (ratio < 0.1)
+                    if ratio > 10.0 || ratio < 0.1 {
+                        #[cfg(debug_assertions)]
+                        {
+                            println!("🦀 [Calculator] 🔍 OCR Check: ratio={:.2}x (expected: 0.1x - 10.0x)", ratio);
+                            println!("🦀 [Calculator] ⚠️ OCR ERROR DETECTED: last_exp={}, current_exp={} (ratio={:.2}x)",
+                                    last.exp, data.exp, ratio);
+                            println!("🦀 [Calculator] 🚫 Rejecting this reading - keeping previous value");
+                        }
+
+                        // Don't update last_data - keep the good value
+                        // Return stats based on last good data
+                        return self.update(last.clone());
+                    }
+                }
+            }
+        }
+
+        // Re-fetch initial after potential reset
+        let initial = self.initial_data.as_ref().unwrap();
 
         // Handle level up
         if data.level > last.level {
@@ -69,9 +114,17 @@ impl ExpCalculator {
 
         // Calculate accumulated values
         let initial = self.initial_data.as_ref().unwrap();
-        let total_exp = (data.exp.saturating_sub(initial.exp)) + self.completed_levels_exp;
-        let total_percentage =
-            (data.percentage - initial.percentage) + self.completed_levels_percentage;
+        let exp_diff = data.exp.saturating_sub(initial.exp);
+        let total_exp = exp_diff + self.completed_levels_exp;
+        let percentage_diff = data.percentage - initial.percentage;
+        let total_percentage = percentage_diff + self.completed_levels_percentage;
+
+        #[cfg(debug_assertions)]
+        {
+            println!("🦀 [Calculator] Calculation: data.exp={} - initial.exp={} = exp_diff={}", data.exp, initial.exp, exp_diff);
+            println!("🦀 [Calculator] Calculation: total_exp = {} + {} = {}", exp_diff, self.completed_levels_exp, total_exp);
+            println!("🦀 [Calculator] Calculation: percentage_diff={}, total_percentage={}", percentage_diff, total_percentage);
+        }
         let total_meso = data
             .meso
             .unwrap_or(0)
@@ -104,6 +157,18 @@ impl ExpCalculator {
             0
         };
 
+        // Get current and start levels (before moving data)
+        let current_level = data.level;
+        let start_level = self.start_level;  // Use stored start level (never changes)
+        let levels_gained = current_level.saturating_sub(start_level);
+
+        // Calculate per-minute average
+        let exp_per_minute = if elapsed_seconds > 0 {
+            (total_exp * 60) / elapsed_seconds
+        } else {
+            0
+        };
+
         self.last_data = Some(data);
 
         Ok(ExpStats {
@@ -114,6 +179,15 @@ impl ExpCalculator {
             exp_per_hour,
             percentage_per_hour,
             meso_per_hour,
+            exp_per_minute,
+            current_level,
+            start_level,
+            levels_gained,
+            // HP/MP potion stats are now managed by separate calculators
+            hp_potions_used: 0,
+            mp_potions_used: 0,
+            hp_potions_per_minute: 0.0,
+            mp_potions_per_minute: 0.0,
         })
     }
 
@@ -122,6 +196,7 @@ impl ExpCalculator {
         self.initial_data = None;
         self.last_data = None;
         self.start_time = None;
+        self.start_level = 0;
         self.completed_levels_exp = 0;
         self.completed_levels_percentage = 0.0;
         self.paused_duration = Duration::ZERO;
@@ -191,6 +266,9 @@ mod tests {
         assert_eq!(stats.total_percentage, 5.0);
         assert_eq!(stats.total_meso, 1000);
         assert!(stats.elapsed_seconds >= 0);
+        assert_eq!(stats.current_level, 50);
+        assert_eq!(stats.start_level, 50);
+        assert_eq!(stats.levels_gained, 0);
     }
 
     #[test]
@@ -226,6 +304,9 @@ mod tests {
         // Should calculate: (10000 - 9500) from level 50 + 200 from level 51
         assert_eq!(stats.total_exp, 500 + 200);
         assert_eq!(stats.total_percentage, 5.0 + 2.0);
+        assert_eq!(stats.current_level, 51);
+        assert_eq!(stats.start_level, 50);
+        assert_eq!(stats.levels_gained, 1);
     }
 
     #[test]
@@ -261,6 +342,38 @@ mod tests {
 
         // 5000 meso in 600 seconds = (5000 / 600) * 3600 = 30000 meso/hour
         assert_eq!(stats.meso_per_hour, 30000);
+
+        // 1000 EXP in 600 seconds = (1000 / 600) * 60 = 100 EXP/minute
+        assert_eq!(stats.exp_per_minute, 100);
+    }
+
+    #[test]
+    fn test_exp_per_minute_calculation() {
+        let mut calculator = ExpCalculator::new().unwrap();
+
+        let initial = ExpData {
+            level: 50,
+            exp: 0,
+            percentage: 0.0,
+            meso: None,
+        };
+
+        calculator.start(initial);
+
+        // Manually set elapsed time to 600 seconds (10 minutes)
+        calculator.start_time = Some(Instant::now() - Duration::from_secs(600));
+
+        let updated = ExpData {
+            level: 50,
+            exp: 6000,
+            percentage: 60.0,
+            meso: None,
+        };
+
+        let stats = calculator.update(updated).unwrap();
+
+        // 6000 EXP in 600 seconds (10 minutes) = 600 EXP/minute
+        assert_eq!(stats.exp_per_minute, 600);
     }
 
     #[test]

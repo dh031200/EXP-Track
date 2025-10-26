@@ -13,8 +13,10 @@ use tauri::State;
 pub enum RoiType {
     Level,
     Exp,
-    Meso,
-    MapLocation,
+    Hp,
+    Mp,
+    // Meso, // Commented out temporarily
+    // MapLocation, // Commented out temporarily
 }
 
 /// State wrapper for configuration manager
@@ -44,8 +46,10 @@ pub fn save_roi(
     match roi_type {
         RoiType::Level => config.roi.level = Some(roi),
         RoiType::Exp => config.roi.exp = Some(roi),
-        RoiType::Meso => config.roi.meso = Some(roi),
-        RoiType::MapLocation => config.roi.map_location = Some(roi),
+        RoiType::Hp => config.roi.hp = Some(roi),
+        RoiType::Mp => config.roi.mp = Some(roi),
+        // RoiType::Meso => config.roi.meso = Some(roi), // Commented out temporarily
+        // RoiType::MapLocation => config.roi.map_location = Some(roi), // Commented out temporarily
     }
 
     // Save updated config
@@ -66,8 +70,10 @@ pub fn load_roi(state: State<ConfigManagerState>, roi_type: RoiType) -> Result<O
     let roi = match roi_type {
         RoiType::Level => config.roi.level,
         RoiType::Exp => config.roi.exp,
-        RoiType::Meso => config.roi.meso,
-        RoiType::MapLocation => config.roi.map_location,
+        RoiType::Hp => config.roi.hp,
+        RoiType::Mp => config.roi.mp,
+        // RoiType::Meso => config.roi.meso, // Commented out temporarily
+        // RoiType::MapLocation => config.roi.map_location, // Commented out temporarily
     };
 
     Ok(roi)
@@ -99,8 +105,10 @@ pub fn clear_roi(state: State<ConfigManagerState>, roi_type: RoiType) -> Result<
     match roi_type {
         RoiType::Level => config.roi.level = None,
         RoiType::Exp => config.roi.exp = None,
-        RoiType::Meso => config.roi.meso = None,
-        RoiType::MapLocation => config.roi.map_location = None,
+        RoiType::Hp => config.roi.hp = None,
+        RoiType::Mp => config.roi.mp = None,
+        // RoiType::Meso => config.roi.meso = None, // Commented out temporarily
+        // RoiType::MapLocation => config.roi.map_location = None, // Commented out temporarily
     }
 
     manager.save(&config)?;
@@ -159,8 +167,10 @@ pub fn save_roi_preview(roi_type: RoiType, image_data: String) -> Result<String,
     let filename = format!("{}_preview.png", match roi_type {
         RoiType::Level => "level",
         RoiType::Exp => "exp",
-        RoiType::Meso => "meso",
-        RoiType::MapLocation => "map_location",
+        RoiType::Hp => "hp",
+        RoiType::Mp => "mp",
+        // RoiType::Meso => "meso", // Commented out temporarily
+        // RoiType::MapLocation => "map_location", // Commented out temporarily
     });
     let file_path = temp_dir.join(&filename);
 
@@ -177,8 +187,10 @@ pub fn open_roi_preview(roi_type: RoiType) -> Result<(), String> {
     let filename = format!("{}_preview.png", match roi_type {
         RoiType::Level => "level",
         RoiType::Exp => "exp",
-        RoiType::Meso => "meso",
-        RoiType::MapLocation => "map_location",
+        RoiType::Hp => "hp",
+        RoiType::Mp => "mp",
+        // RoiType::Meso => "meso", // Commented out temporarily
+        // RoiType::MapLocation => "map_location", // Commented out temporarily
     });
     let file_path = temp_dir.join(&filename);
 

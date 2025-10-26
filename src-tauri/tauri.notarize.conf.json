@@ -1,0 +1,78 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "exp-tracker",
+  "version": "0.1.0",
+  "identifier": "com.danny.exp-tracker",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "bash scripts/build_python_server.sh && npm run icon:generate && npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "title": "exp-tracker",
+        "width": 480,
+        "height": 300,
+        "minWidth": 480,
+        "minHeight": 300,
+        "maxWidth": 480,
+        "maxHeight": 300,
+        "resizable": true,
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true
+      }
+    ],
+    "security": {
+      "csp": null,
+      "capabilities": [
+        {
+          "identifier": "main-capability",
+          "description": "Capability for main window",
+          "windows": ["*"],
+          "permissions": [
+            "core:default",
+            "core:window:allow-set-size",
+            "core:window:allow-set-position",
+            "core:window:allow-inner-size",
+            "core:window:allow-outer-position",
+            "core:window:allow-current-monitor",
+            "core:window:allow-monitor-from-point",
+            "core:window:allow-available-monitors",
+            "core:window:allow-primary-monitor",
+            "core:window:allow-set-always-on-top",
+            "core:window:allow-minimize",
+            "core:window:allow-close",
+            "core:window:allow-start-dragging",
+            "core:webview:allow-create-webview-window",
+            "core:webview:allow-webview-position",
+            "core:webview:allow-webview-size",
+            "core:webview:allow-internal-toggle-devtools"
+          ]
+        }
+      ]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": [
+      "resources/ocr_server/*",
+      "resources/ocr_server/**/*"
+    ],
+    "macOS": {
+      "entitlements": "entitlements.plist",
+      "signingIdentity": "-"
+    }
+  }
+}
