@@ -7,12 +7,12 @@ use tauri::Manager;
 
 use commands::config::{
     clear_roi, get_all_rois, get_config_path, init_config_manager, load_config, load_roi,
-    open_roi_preview, save_config, save_roi, save_roi_preview, ConfigManagerState,
+    open_roi_preview, save_config, save_roi, save_roi_preview,
 };
 use commands::ocr::{
     init_ocr_service, recognize_all_parallel, recognize_exp, recognize_hp_potion_count, recognize_level,
     check_ocr_health,
-    recognize_map, recognize_mp_potion_count, OcrServiceState,
+    recognize_map, recognize_mp_potion_count,
 };
 use commands::screen_capture::{
     capture_full_screen, capture_region, get_screen_dimensions, init_screen_capture,
@@ -96,7 +96,7 @@ pub fn run() {
                     // Stop OCR tracking
                     let tracker_state = app.state::<TrackerState>();
                     {
-                        let tracker = tracker_state.0.lock().await;
+                        let tracker = tracker_state.inner().0.lock().await;
                         tracker.stop_tracking().await;
 
                         #[cfg(debug_assertions)]

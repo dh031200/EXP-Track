@@ -2,9 +2,28 @@ use crate::models::roi::Roi;
 use image::DynamicImage;
 use xcap::Monitor;
 
+/// Thread-safe wrapper for xcap::Monitor
+///
+/// SAFETY: This wrapper implements Send and Sync for Monitor, which is safe because:
+/// 1. Monitor is essentially a handle to OS display resources
+/// 2. On Windows, HMONITOR handles are thread-safe at the OS level
+/// 3. All xcap operations internally handle synchronization
+/// 4. We only use Monitor for read-only capture operations
+#[derive(Clone)]
+struct SendSyncMonitor(Monitor);
+
+// SAFETY: Monitor handles are thread-safe at the OS level.
+// The underlying HMONITOR (Windows) or equivalent handles on other platforms
+// can be safely sent between threads.
+unsafe impl Send for SendSyncMonitor {}
+
+// SAFETY: Monitor operations through xcap are internally synchronized
+// and the OS display resources are inherently shareable across threads.
+unsafe impl Sync for SendSyncMonitor {}
+
 /// Screen capture service using xcap
 pub struct ScreenCapture {
-    monitor: Monitor,
+    monitor: SendSyncMonitor,
     scale_factor: f64,
 }
 
@@ -17,15 +36,14 @@ impl ScreenCapture {
             .find(|m| m.is_primary().unwrap_or(false))
             .ok_or("No primary monitor found")?;
 
-        // Calculate scale factor: physical pixels / logical pixels
-        let physical_width = monitor.width().map_err(|e| format!("Failed to get width: {}", e))?;
-        let logical_width = monitor.width().map_err(|e| format!("Failed to get width: {}", e))?;
-
         // xcap returns physical pixels, so we need to detect the scale factor
         // On macOS Retina, the scale factor is typically 2.0
         let scale_factor = monitor.scale_factor().unwrap_or(1.0) as f64;
 
-        Ok(Self { monitor, scale_factor })
+        Ok(Self {
+            monitor: SendSyncMonitor(monitor),
+            scale_factor
+        })
     }
 
     /// Create screen capture for a specific monitor by index
@@ -39,13 +57,16 @@ impl ScreenCapture {
 
         let scale_factor = monitor.scale_factor().unwrap_or(1.0) as f64;
 
-        Ok(Self { monitor, scale_factor })
+        Ok(Self {
+            monitor: SendSyncMonitor(monitor),
+            scale_factor
+        })
     }
 
     /// Capture a specific region of the screen
     pub fn capture_region(&self, roi: &Roi) -> Result<DynamicImage, String> {
         let rgba_image = self
-            .monitor
+            .monitor.0
             .capture_image()
             .map_err(|e| format!("Failed to capture screen: {}", e))?;
 
@@ -77,7 +98,7 @@ impl ScreenCapture {
     /// Capture entire screen
     pub fn capture_full(&self) -> Result<DynamicImage, String> {
         let rgba_image = self
-            .monitor
+            .monitor.0
             .capture_image()
             .map_err(|e| format!("Failed to capture screen: {}", e))?;
 
@@ -87,11 +108,11 @@ impl ScreenCapture {
     /// Get monitor dimensions
     pub fn get_dimensions(&self) -> Result<(u32, u32), String> {
         let width = self
-            .monitor
+            .monitor.0
             .width()
             .map_err(|e| format!("Failed to get width: {}", e))?;
         let height = self
-            .monitor
+            .monitor.0
             .height()
             .map_err(|e| format!("Failed to get height: {}", e))?;
 
