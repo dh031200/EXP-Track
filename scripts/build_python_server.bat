@@ -109,6 +109,52 @@ if errorlevel 1 (
     echo [OK] Rust is installed
 )
 
+REM Check for MSVC linker (link.exe) - required for Rust on Windows
+where link.exe >nul 2>&1
+if errorlevel 1 (
+    echo [INFO] Visual Studio Build Tools not detected
+    echo.
+    echo MSVC linker is required for building Rust applications on Windows
+    set /p "INSTALL_BUILDTOOLS=   Would you like to install Visual Studio Build Tools? (y/N): "
+
+    if /i "!INSTALL_BUILDTOOLS!"=="y" (
+        echo [INFO] Installing Visual Studio Build Tools...
+        echo [INFO] This may take several minutes...
+
+        REM Try winget first
+        where winget >nul 2>&1
+        if not errorlevel 1 (
+            echo [INFO] Using winget...
+            winget install Microsoft.VisualStudio.2022.BuildTools --override "--wait --quiet --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+        ) else (
+            echo [INFO] Opening download page...
+            echo        Please download and install "Build Tools for Visual Studio 2022"
+            echo        Make sure to select "Desktop development with C++" workload
+            start https://visualstudio.microsoft.com/downloads/
+            echo.
+            echo        After installation, restart your terminal and run this script again
+            pause
+            exit /b 1
+        )
+
+        where link.exe >nul 2>&1
+        if errorlevel 1 (
+            echo [WARN] Build Tools installation requires a new terminal session
+            echo        Please restart your terminal and run this script again
+            exit /b 1
+        ) else (
+            echo [OK] Visual Studio Build Tools installed successfully
+        )
+    ) else (
+        echo [ERROR] Visual Studio Build Tools are required for building Tauri on Windows
+        echo        Download from: https://visualstudio.microsoft.com/downloads/
+        echo        Select "Desktop development with C++" during installation
+        exit /b 1
+    )
+) else (
+    echo [OK] Visual Studio Build Tools detected
+)
+
 REM Check if uv is installed, offer to install if not
 set USE_UV=false
 where uv >nul 2>&1
