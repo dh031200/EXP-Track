@@ -116,11 +116,37 @@ echo.
 
 REM Check for MSVC linker (link.exe) - required for Rust on Windows
 echo [CHECK] Checking for Visual Studio Build Tools...
+
+REM Try multiple ways to find link.exe
+set MSVC_FOUND=false
+
+REM Method 1: Check if link.exe is in PATH
 where link.exe >nul 2>&1
-if errorlevel 1 (
-    echo [INFO] Visual Studio Build Tools not detected
+if not errorlevel 1 (
+    set MSVC_FOUND=true
+)
+
+REM Method 2: Check common Visual Studio installation paths
+if "%MSVC_FOUND%"=="false" (
+    for %%V in (2022 2019 2017) do (
+        for %%E in (BuildTools Community Professional Enterprise) do (
+            if exist "C:\Program Files\Microsoft Visual Studio\%%V\%%E\VC\Tools\MSVC" (
+                set MSVC_FOUND=true
+                goto :msvc_found
+            )
+            if exist "C:\Program Files (x86)\Microsoft Visual Studio\%%V\%%E\VC\Tools\MSVC" (
+                set MSVC_FOUND=true
+                goto :msvc_found
+            )
+        )
+    )
+)
+:msvc_found
+
+if "%MSVC_FOUND%"=="false" (
+    echo [WARN] Visual Studio Build Tools not detected
     echo.
-    echo MSVC linker is required for building Rust applications on Windows
+    echo MSVC linker is required for building Rust/Tauri applications on Windows
     set /p "INSTALL_BUILDTOOLS=   Would you like to install Visual Studio Build Tools? (y/N): "
 
     if /i "!INSTALL_BUILDTOOLS!"=="y" (
@@ -132,6 +158,7 @@ if errorlevel 1 (
         if not errorlevel 1 (
             echo [INFO] Using winget...
             winget install Microsoft.VisualStudio.2022.BuildTools --override "--wait --quiet --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+            echo [INFO] Installation complete. Please restart your terminal.
         ) else (
             echo [INFO] Opening download page...
             echo        Please download and install "Build Tools for Visual Studio 2022"
@@ -139,23 +166,11 @@ if errorlevel 1 (
             start https://visualstudio.microsoft.com/downloads/
             echo.
             echo        After installation, restart your terminal and run this script again
-            pause
-            exit /b 1
-        )
-
-        where link.exe >nul 2>&1
-        if errorlevel 1 (
-            echo [WARN] Build Tools installation requires a new terminal session
-            echo        Please restart your terminal and run this script again
-            exit /b 1
-        ) else (
-            echo [OK] Visual Studio Build Tools installed successfully
         )
     ) else (
-        echo [ERROR] Visual Studio Build Tools are required for building Tauri on Windows
-        echo        Download from: https://visualstudio.microsoft.com/downloads/
-        echo        Select "Desktop development with C++" during installation
-        exit /b 1
+        echo [WARN] Continuing without Visual Studio Build Tools
+        echo        Note: Tauri build will fail without MSVC linker
+        echo        You can install it later from: https://visualstudio.microsoft.com/downloads/
     )
 ) else (
     echo [OK] Visual Studio Build Tools detected
