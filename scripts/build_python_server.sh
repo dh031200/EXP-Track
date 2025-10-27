@@ -10,6 +10,31 @@ echo "🐍 Building Python OCR Server..."
 # Navigate to project root
 cd "$(dirname "$0")/.."
 
+# Check if npm is installed
+if ! command -v npm &> /dev/null; then
+    echo "⚠️  npm is not installed"
+    echo "   npm is required for Tauri frontend development"
+    echo "   Please install Node.js (includes npm) from https://nodejs.org"
+    exit 1
+fi
+echo "✓ npm is installed"
+
+# Install npm dependencies if needed
+if [ ! -d "node_modules" ]; then
+    echo "📦 Installing npm dependencies..."
+    npm install
+    echo "✅ npm dependencies installed"
+fi
+
+# Generate icons if not present
+if [ ! -f "src-tauri/icons/icon.ico" ]; then
+    echo "🎨 Generating Tauri icons..."
+    npm run icon:generate
+    echo "✅ Icons generated"
+else
+    echo "✓ Icons already exist"
+fi
+
 # Check if Python is available
 if ! command -v python3 &> /dev/null; then
     echo "❌ Python 3 is not installed"

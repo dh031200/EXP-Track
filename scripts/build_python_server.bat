@@ -14,7 +14,7 @@ REM Check if npm is installed
 echo [CHECK] Checking for npm...
 where npm >nul 2>&1
 if errorlevel 1 (
-    echo [INFO] npm is not installed
+    echo [WARN] npm is not installed
     echo.
     echo npm is required for Node.js development (required for Tauri frontend)
     set /p "INSTALL_NPM=   Would you like to install Node.js (includes npm)? (y/N): "
@@ -60,6 +60,12 @@ if errorlevel 1 (
     )
 ) else (
     echo [OK] npm is installed
+
+    REM Check if node_modules exists and suggest npm install
+    if not exist "node_modules" (
+        echo [INFO] node_modules not found
+        echo        Run 'npm install' to install dependencies
+    )
 )
 echo.
 
@@ -191,12 +197,19 @@ if errorlevel 1 (
         echo [INFO] Installing uv...
         powershell -ExecutionPolicy ByPass -Command "irm https://astral.sh/uv/install.ps1 | iex"
 
-        REM Add uv to PATH for current session
-        set "PATH=%USERPROFILE%\.cargo\bin;%PATH%"
+        REM Add uv to PATH for current session (try multiple locations)
+        set "PATH=%USERPROFILE%\.local\bin;%USERPROFILE%\.cargo\bin;%PATH%"
+
+        REM Wait a moment for installation to complete
+        timeout /t 2 /nobreak >nul 2>&1
 
         where uv >nul 2>&1
         if errorlevel 1 (
-            echo [WARN] uv installation failed, will use python instead
+            echo [WARN] uv installation requires a new terminal session
+            echo        Please close this terminal and open a new one
+            echo        Or manually add to PATH: %USERPROFILE%\.local\bin
+            echo.
+            echo [INFO] Using python instead for now
             set USE_UV=false
         ) else (
             echo [OK] uv installed successfully
