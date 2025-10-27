@@ -47,7 +47,7 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
-
+*.zip
 
 # Development documentation
 devdocs/
