@@ -211,7 +211,7 @@ if __name__ == "__main__":
     # Backup original spec if it exists
     if spec_path.exists():
         backup_path = spec_path.with_suffix(".spec.bak")
-        spec_path.rename(backup_path)
+        spec_path.replace(backup_path)
         print(f"Backed up original spec to {backup_path}")
 
     # Write new spec
