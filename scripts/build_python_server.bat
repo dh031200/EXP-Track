@@ -9,6 +9,106 @@ echo Building Python OCR Server...
 REM Navigate to project root
 cd /d "%~dp0\.."
 
+REM Check if npm is installed
+where npm >nul 2>&1
+if errorlevel 1 (
+    echo [INFO] npm is not installed
+    echo.
+    echo npm is required for Node.js development (required for Tauri frontend)
+    set /p "INSTALL_NPM=   Would you like to install Node.js (includes npm)? (y/N): "
+
+    if /i "!INSTALL_NPM!"=="y" (
+        echo [INFO] Installing Node.js...
+        echo [INFO] Checking for package manager...
+
+        REM Try winget first
+        where winget >nul 2>&1
+        if not errorlevel 1 (
+            echo [INFO] Using winget...
+            winget install -e --id OpenJS.NodeJS
+        ) else (
+            REM Try chocolatey
+            where choco >nul 2>&1
+            if not errorlevel 1 (
+                echo [INFO] Using chocolatey...
+                choco install nodejs -y
+            ) else (
+                echo [WARN] No package manager found
+                echo        Please install Node.js manually from https://nodejs.org
+                echo        Then run this script again
+                exit /b 1
+            )
+        )
+
+        REM Refresh PATH
+        echo [INFO] Refreshing environment...
+        call refreshenv 2>nul
+
+        where npm >nul 2>&1
+        if errorlevel 1 (
+            echo [WARN] npm installation may require a new terminal session
+            echo        Please restart your terminal and run this script again
+            exit /b 1
+        ) else (
+            echo [OK] Node.js and npm installed successfully
+        )
+    ) else (
+        echo [WARN] npm is required for building Tauri frontend
+        echo        You can install it later from https://nodejs.org
+    )
+) else (
+    echo [OK] npm is installed
+)
+
+REM Check if Rust is installed
+where rustc >nul 2>&1
+if errorlevel 1 (
+    echo [INFO] Rust is not installed
+    echo.
+    echo Rust is required for building Tauri backend
+    set /p "INSTALL_RUST=   Would you like to install Rust? (y/N): "
+
+    if /i "!INSTALL_RUST!"=="y" (
+        echo [INFO] Installing Rust...
+
+        REM Try winget first
+        where winget >nul 2>&1
+        if not errorlevel 1 (
+            echo [INFO] Using winget...
+            winget install -e --id Rustlang.Rustup
+        ) else (
+            echo [INFO] Downloading rustup-init.exe...
+            powershell -Command "Invoke-WebRequest -Uri 'https://win.rustup.rs' -OutFile '%TEMP%\rustup-init.exe'"
+            if exist "%TEMP%\rustup-init.exe" (
+                echo [INFO] Running Rust installer...
+                "%TEMP%\rustup-init.exe" -y
+                del "%TEMP%\rustup-init.exe"
+            ) else (
+                echo [ERROR] Failed to download Rust installer
+                echo        Please install manually from https://rustup.rs
+                exit /b 1
+            )
+        )
+
+        REM Add Rust to PATH for current session
+        set "PATH=%USERPROFILE%\.cargo\bin;%PATH%"
+
+        where rustc >nul 2>&1
+        if errorlevel 1 (
+            echo [WARN] Rust installation may require a new terminal session
+            echo        Please restart your terminal and run this script again
+            exit /b 1
+        ) else (
+            echo [OK] Rust installed successfully
+        )
+    ) else (
+        echo [WARN] Rust is required for building Tauri applications
+        echo        You can install it later from https://rustup.rs
+    )
+) else (
+    echo [OK] Rust is installed
+)
+
 REM Check if uv is installed, offer to install if not
 set USE_UV=false
 where uv >nul 2>&1
