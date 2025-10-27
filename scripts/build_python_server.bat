@@ -5,11 +5,13 @@ REM This script bundles the Python server into a single executable
 setlocal enabledelayedexpansion
 
 echo Building Python OCR Server...
+echo.
 
 REM Navigate to project root
 cd /d "%~dp0\.."
 
 REM Check if npm is installed
+echo [CHECK] Checking for npm...
 where npm >nul 2>&1
 if errorlevel 1 (
     echo [INFO] npm is not installed
@@ -59,8 +61,10 @@ if errorlevel 1 (
 ) else (
     echo [OK] npm is installed
 )
+echo.
 
 REM Check if Rust is installed
+echo [CHECK] Checking for Rust...
 where rustc >nul 2>&1
 if errorlevel 1 (
     echo [INFO] Rust is not installed
@@ -108,8 +112,10 @@ if errorlevel 1 (
 ) else (
     echo [OK] Rust is installed
 )
+echo.
 
 REM Check for MSVC linker (link.exe) - required for Rust on Windows
+echo [CHECK] Checking for Visual Studio Build Tools...
 where link.exe >nul 2>&1
 if errorlevel 1 (
     echo [INFO] Visual Studio Build Tools not detected
@@ -154,8 +160,10 @@ if errorlevel 1 (
 ) else (
     echo [OK] Visual Studio Build Tools detected
 )
+echo.
 
 REM Check if uv is installed, offer to install if not
+echo [CHECK] Checking for uv...
 set USE_UV=false
 where uv >nul 2>&1
 if errorlevel 1 (
@@ -187,9 +195,11 @@ if errorlevel 1 (
     echo [OK] uv is installed
     set USE_UV=true
 )
+echo.
 
 REM Check if Python is available (only if not using uv)
 if "%USE_UV%"=="false" (
+    echo [CHECK] Checking for Python...
     python --version >nul 2>&1
     if errorlevel 1 (
         echo [ERROR] Python 3 is not installed
