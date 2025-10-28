@@ -10,7 +10,7 @@
     "tauri": "tauri",
     "tauri:build": "tauri build",
     "tauri:build:notarize": "tauri build --config src-tauri/tauri.notarize.conf.json",
-    "icon:generate": "tauri icon src-tauri/icons/EXP_Tracker.png",
+    "icon:generate": "tauri icon public/icons/EXP_Tracker.png",
     "prebuild": "npm run icon:generate",
     "build:notarize": "npm run build && npm run tauri:build:notarize",
     "sign:notarize": "bash scripts/sign_and_notarize.sh",
