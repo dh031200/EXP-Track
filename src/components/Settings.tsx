@@ -68,7 +68,7 @@ export function Settings() {
             <option value="180">3시간</option>
           </select>
           <p className="settings-help">
-            목표 시간을 설정하면 타이머에 남은 시간이 표시됩니다.
+            목표 시간을 설정하면 타이머에 완료 예정 시각이 표시됩니다.
           </p>
         </div>
       </div>

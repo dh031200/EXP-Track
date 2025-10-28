@@ -92,16 +92,43 @@ export function RoiSelector({ onRoiSelected, onCancel }: RoiSelectorProps) {
     }));
   };
 
-  const handleMouseUp = () => {
+  const handleMouseUp = async () => {
     if (!dragState.isDrawing) return;
 
     const { startX, startY, currentX, currentY } = dragState;
 
-    // Calculate ROI bounds
-    const x = Math.round(Math.min(startX, currentX));
-    const y = Math.round(Math.min(startY, currentY));
+    // Get actual window position at selection time
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    const currentWindow = getCurrentWindow();
+    const windowPos = await currentWindow.outerPosition();
+    const scaleFactor = await currentWindow.scaleFactor();
+    const logicalWindowPos = windowPos.toLogical(scaleFactor);
+
+    // Get overlay position (may differ from window position due to frame/titlebar)
+    const overlay = overlayRef.current;
+    const overlayRect = overlay?.getBoundingClientRect();
+    const overlayScreenX = overlayRect ? overlayRect.left : 0;
+    const overlayScreenY = overlayRect ? overlayRect.top : 0;
+
+    console.log('🖱️ ROI Selection Debug:');
+    console.log('  Window dimensions:', dimensions);
+    console.log('  Window position (logical):', { x: logicalWindowPos.x, y: logicalWindowPos.y });
+    console.log('  Overlay screen position:', { x: overlayScreenX, y: overlayScreenY });
+    console.log('  Selected ROI (relative to overlay):', { startX, startY, currentX, currentY });
+
+    // Calculate ROI bounds (relative to overlay)
+    const relativeX = Math.round(Math.min(startX, currentX));
+    const relativeY = Math.round(Math.min(startY, currentY));
     const width = Math.round(Math.abs(currentX - startX));
     const height = Math.round(Math.abs(currentY - startY));
+
+    // Convert to absolute screen coordinates
+    const x = relativeX + overlayScreenX;
+    const y = relativeY + overlayScreenY;
+
+    console.log('  Selected ROI (relative):', { x: relativeX, y: relativeY, width, height });
+    console.log('  Selected ROI (absolute):', { x, y, width, height });
+    console.log('  Device Pixel Ratio:', window.devicePixelRatio);
 
     // Validate ROI size (minimum 10x10 pixels)
     if (width >= 10 && height >= 10) {

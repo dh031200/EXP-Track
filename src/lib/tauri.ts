@@ -117,6 +117,16 @@ export async function maximizeWindowForROI(): Promise<WindowState> {
   await window.setSize(new LogicalSize(newWidth, newHeight));
   console.log('[6/7] ✅ Size set successfully');
 
+  // Verify actual window position (may differ due to Windows shadow effects)
+  const actualPosition = await window.outerPosition();
+  const actualLogicalPos = actualPosition.toLogical(await window.scaleFactor());
+  console.log('[7/7] 📍 Actual window position:', { 
+    x: actualLogicalPos.x, 
+    y: actualLogicalPos.y,
+    offsetX: actualLogicalPos.x - newX,
+    offsetY: actualLogicalPos.y - newY
+  });
+
   console.log('[7/7] ✅ Window maximized successfully');
   console.log('=== END maximizeWindowForROI ===');
 
