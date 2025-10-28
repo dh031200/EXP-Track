@@ -21,9 +21,8 @@ src-tauri/target/
 src-tauri/Cargo.lock
 target/
 
-# Generated icons (keep only the source EXP_Tracker.png)
+# Generated icons (source is now in public/icons/EXP_Tracker.png)
 src-tauri/icons/*
-!src-tauri/icons/EXP_Tracker.png
 
 # Environment variables
 .env
@@ -53,7 +52,6 @@ Thumbs.db
 
 # Development documentation
 devdocs/
-icons/
 legacy/
 .serena/
 .venv/
