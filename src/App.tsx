@@ -577,7 +577,7 @@ function App() {
             display: 'flex',
           flexDirection: (showSettings || showMesoInputModal) ? 'column' : 'row',
           alignItems: (showSettings || showMesoInputModal) ? 'stretch' : 'center',
-          padding: isSelecting ? '0' : (showSettings || showMesoInputModal) ? '0' : '8px 20px',
+          padding: isSelecting ? '0' : (showSettings || showMesoInputModal) ? '0' : '8px 12px',
           paddingTop: isSelecting ? '0' : (showSettings || showMesoInputModal) ? '0' : '35px',
           paddingBottom: isSelecting ? '0' : (showSettings || showMesoInputModal) ? '0' : '10px',
           gap: '4px',
@@ -666,7 +666,7 @@ function App() {
         alignItems: 'center',
                 justifyContent: 'center',
                 gap: '4px',
-                minWidth: '140px',
+                minWidth: '160px',
                 paddingRight: '12px',
                 borderRight: '1px solid rgba(0, 0, 0, 0.1)'
               }}
@@ -772,16 +772,17 @@ function App() {
 
               {/* Timer */}
               <div style={{
-                fontSize: '24px',
+                fontSize: '28px',
                 fontWeight: 600,
                 color: trackingState === 'tracking' ? '#2196F3' : '#666'
               }}>
                 {formatTime(elapsedSeconds)}
               </div>
               <div style={{
-                fontSize: '15px',
+                fontSize: '12px',
                 fontWeight: 600,
-                color: '#999'
+                color: '#999',
+                textAlign: 'center'
               }}>
                 {targetDuration > 0 && trackingState === 'tracking' ? (
                   (() => {
@@ -811,97 +812,161 @@ function App() {
               </div>
             </div>
 
-            {/* Section 2: 경험치 */}
+            {/* Section 2 & 3: 경험치 + 포션/메소 */}
             <div style={{
               flex: 1,
               display: 'flex',
               flexDirection: 'column',
               justifyContent: 'center',
-              gap: '6px',
-              paddingLeft: '12px',
-              paddingRight: '0px',
-              borderRight: '1px solid rgba(0, 0, 0, 0.1)'
+              gap: '8px',
+              paddingLeft: '12px'
             }}>
+              {/* 첫 번째 줄: 경험치 정보 + 포션 사용 */}
               <div style={{
                 display: 'flex',
-                alignItems: 'center',
-                gap: '90px'
+                alignItems: 'flex-start',
+                gap: '12px'
               }}>
-                <div>
-                  <div style={{
-                    fontSize: '14px',
-                    fontWeight: 600,
-                    color: '#666'
-                  }}>
-                    레벨업까지
+                {/* 경험치 정보 */}
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '40px',
+                  flex: 1,
+                  paddingRight: '12px',
+                  borderRight: '1px solid rgba(0, 0, 0, 0.1)'
+                }}>
+                  <div>
+                    <div style={{
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      color: '#666'
+                    }}>
+                      레벨업까지
+                    </div>
+                    <div style={{
+                      fontSize: '18px',
+                      fontWeight: '700',
+                      color: '#d32f2f'
+                    }}>
+                      {levelUpETA}
+                    </div>
                   </div>
-                  <div style={{
-                    fontSize: '18px',
-                    fontWeight: '700',
-                    color: '#d32f2f'
-                  }}>
-                    {levelUpETA}
+                  <div>
+                    <div style={{
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      color: '#666'
+                    }}>
+                      획득 경험치
+                    </div>
+                    <div style={{
+                      fontSize: '16px',
+                      fontWeight: '700',
+                      color: '#2196F3'
+                    }}>
+                      {parallelOcrTracker.stats?.total_exp?.toLocaleString('ko-KR') || '0'}
+                    </div>
                   </div>
                 </div>
-                <div>
-                  <div style={{
-                    fontSize: '14px',
-                    fontWeight: 600,
-                    color: '#666'
-                  }}>
-                    획득 경험치
+
+                {/* 포션 사용 */}
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '4px',
+                  minWidth: '120px'
+                }}>
+                  <div style={{ fontWeight: '600', color: '#666', fontSize: '12px' }}>
+                    포션 사용
                   </div>
                   <div style={{
-                    fontSize: '16px',
-                    fontWeight: '700',
-                    color: '#2196F3'
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px'
                   }}>
-                    {parallelOcrTracker.stats?.total_exp?.toLocaleString('ko-KR') || '0'}
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}>
+                      <img src={hpIcon} alt="HP" style={{ width: '20px', height: '20px' }} />
+                      <div style={{
+                        fontSize: '14px',
+                        fontWeight: '700',
+                        color: '#f44336'
+                      }}>
+                        {parallelOcrTracker.stats?.hp_potions_used || 0}
+                      </div>
+                    </div>
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}>
+                      <img src={mpIcon} alt="MP" style={{ width: '20px', height: '20px' }} />
+                      <div style={{
+                        fontSize: '14px',
+                        fontWeight: '700',
+                        color: '#2196F3'
+                      }}>
+                        {parallelOcrTracker.stats?.mp_potions_used || 0}
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
+
+              {/* 두 번째 줄: 현재 레벨 + 메소 수익 */}
               <div style={{
-                fontSize: '13px',
-                color: '#666',
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '12px',
                 borderTop: '1px solid rgba(0, 0, 0, 0.05)',
-                paddingTop: '4px',
-                paddingBottom: '4px'
+                paddingTop: '6px'
               }}>
-                현재: Lv.{parallelOcrTracker.stats?.level || '?'} ({parallelOcrTracker.stats?.percentage?.toFixed(2) || '0.00'}%) | 시간당: {parallelOcrTracker.stats?.exp_per_hour?.toLocaleString('ko-KR') || '0'}
-              </div>
-              {/* 메소 정보 */}
-              {(startMeso !== null || endMeso !== null) && (
+                {/* 현재 레벨 정보 */}
                 <div style={{
                   fontSize: '11px',
-                  borderTop: '1px solid rgba(0, 0, 0, 0.05)',
-                  paddingTop: '4px',
+                  color: '#666',
+                  flex: 1,
+                  paddingRight: '12px',
+                  borderRight: '1px solid rgba(0, 0, 0, 0.1)',
                   display: 'flex',
                   flexDirection: 'column',
                   gap: '3px'
                 }}>
-                  <div style={{ fontWeight: '600', color: '#666', fontSize: '12px' }}>
-                    💰 메소 수익
+                  <div>현재: Lv.{parallelOcrTracker.stats?.level || '?'} ({parallelOcrTracker.stats?.percentage?.toFixed(2) || '0.00'}%)</div>
+                  <div>시간당: {parallelOcrTracker.stats?.exp_per_hour?.toLocaleString('ko-KR') || '0'}</div>
+                </div>
+
+                {/* 메소 수익 */}
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '3px',
+                  minWidth: '180px'
+                }}>
+                  <div style={{ fontWeight: '600', color: '#666', fontSize: '11px' }}>
+                    메소 수익
                   </div>
                   {startMeso !== null && endMeso !== null ? (
                     <div style={{ 
                       display: 'flex', 
-                      alignItems: 'center', 
-                      gap: '8px',
+                      alignItems: 'center',
+                      gap: '5px',
                       flexWrap: 'wrap'
                     }}>
-                      <span style={{ color: '#2196F3', fontWeight: '600' }}>
-                        몹: {calculateMesoGained().toLocaleString('ko-KR')}
-                      </span>
-                      <span style={{ color: '#ddd' }}>|</span>
-                      <span style={{ color: '#FF9800', fontWeight: '600' }}>
+                      <span style={{ color: '#FF9800', fontWeight: '600', fontSize: '10px' }}>
                         포션: -{calculatePotionCost(
                           parallelOcrTracker.stats?.hp_potions_used || 0,
                           parallelOcrTracker.stats?.mp_potions_used || 0
                         ).toLocaleString('ko-KR')}
                       </span>
-                      <span style={{ color: '#ddd' }}>|</span>
+                      <span style={{ color: '#ddd', fontSize: '10px' }}>|</span>
                       <span style={{ 
                         fontWeight: '700',
+                        fontSize: '10px',
                         color: calculateNetProfit(
                           parallelOcrTracker.stats?.hp_potions_used || 0,
                           parallelOcrTracker.stats?.mp_potions_used || 0
@@ -913,53 +978,11 @@ function App() {
                         ).toLocaleString('ko-KR')}
                       </span>
                     </div>
-                  ) : startMeso !== null ? (
-                    <div style={{ color: '#999', fontWeight: '600' }}>
-                      시작: {startMeso.toLocaleString('ko-KR')} 메소
+                  ) : (
+                    <div style={{ color: '#999', fontWeight: '600', fontSize: '10px' }}>
+                      메소 정보 미입력
                     </div>
-                  ) : null}
-                </div>
-              )}
-            </div>
-
-            {/* Section 3: 포션 */}
-            <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'center',
-              gap: '8px',
-              minWidth: '80px',
-              paddingLeft: '2px'
-            }}>
-              {/* HP Potion */}
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}>
-                <img src={hpIcon} alt="HP" style={{ width: '32px', height: '32px' }} />
-                <div style={{
-                  fontSize: '16px',
-                  fontWeight: '700',
-                  color: '#f44336'
-                }}>
-                  {parallelOcrTracker.stats?.hp_potions_used || 0}
-                </div>
-              </div>
-
-              {/* MP Potion */}
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}>
-                <img src={mpIcon} alt="MP" style={{ width: '32px', height: '32px' }} />
-                <div style={{
-                  fontSize: '16px',
-                  fontWeight: '700',
-                  color: '#2196F3'
-                }}>
-                  {parallelOcrTracker.stats?.mp_potions_used || 0}
+                  )}
                 </div>
               </div>
             </div>
