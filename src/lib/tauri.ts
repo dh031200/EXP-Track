@@ -75,8 +75,9 @@ export async function maximizeWindowForROI(): Promise<WindowState> {
   const position = await window.outerPosition();
 
   // Convert to logical coordinates for consistency (HiDPI-aware)
-  const logicalSize = size.toLogical(await window.scaleFactor());
-  const logicalPosition = position.toLogical(await window.scaleFactor());
+  const scaleFactor = await window.scaleFactor();
+  const logicalSize = size.toLogical(scaleFactor);
+  const logicalPosition = position.toLogical(scaleFactor);
 
   const originalState: WindowState = {
     width: logicalSize.width,
@@ -85,10 +86,10 @@ export async function maximizeWindowForROI(): Promise<WindowState> {
     y: logicalPosition.y,
   };
 
-  // Get screen dimensions
+  // Get screen dimensions from backend
   const [screenWidth, screenHeight] = await getScreenDimensions();
 
-  // Resize to almost full screen (leave small margin for visibility)
+  // Resize to full screen (no margin)
   const margin = 0;
   const newX = margin;
   const newY = margin;

@@ -19,6 +19,7 @@ dist-ssr
 # Tauri / Rust
 src-tauri/target/
 src-tauri/Cargo.lock
+target/
 
 # Generated icons (keep only the source EXP_Tracker.png)
 src-tauri/icons/*
@@ -83,3 +84,4 @@ test_*.py
 # External library clones
 rapid/
 rapidocr/
+python_ocr_server/ocr_server.spec

@@ -37,7 +37,15 @@ export function RoiSelector({ onRoiSelected, onCancel }: RoiSelectorProps) {
       try {
         await initScreenCapture();
         const dims = await getScreenDimensions();
-        setDimensions(dims);
+        
+        // On macOS HiDPI, use actual viewport dimensions instead of backend dimensions
+        // window.innerWidth/Height already accounts for device pixel ratio
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+        
+
+        // Use viewport dimensions for overlay sizing (handles HiDPI correctly)
+        setDimensions([viewportWidth, viewportHeight]);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to initialize screen capture');
       }
@@ -116,14 +124,33 @@ export function RoiSelector({ onRoiSelected, onCancel }: RoiSelectorProps) {
     const width = Math.round(Math.abs(currentX - startX));
     const height = Math.round(Math.abs(currentY - startY));
 
+    // Detect platform
+    const isMacOS = navigator.platform.includes('Mac');
+    
     // Convert to absolute screen coordinates
-    // On Windows, the window frame/shadow causes an offset even when positioned at (0,0)
-    // Example: Set position to (0,0) but window actually at (-8,-8) or (8,8) due to frame
-    // overlayRect gives us the overlay's screen position
-    // logicalWindowPos gives us the actual window position
-    // Real screen coords = relative + overlay position - window position offset
-    const x = relativeX + overlayScreenX - logicalWindowPos.x;
-    const y = relativeY + overlayScreenY - logicalWindowPos.y;
+    // Platform-specific coordinate calculation:
+    //
+    // macOS:
+    //   - Window at (0, 31) means content starts at screen position (0, 31)
+    //   - Overlay fills window content
+    //   - Screen coords = overlay coords + window position
+    //
+    // Windows:
+    //   - Window frame/shadow causes offset when positioned at (0,0)
+    //   - Example: Set position to (0,0) but actually at (-8,-8) due to frame
+    //   - getBoundingClientRect() gives actual screen position including frame
+    //   - Screen coords = overlay coords + overlay screen position - window position offset
+    
+    let x, y;
+    if (isMacOS) {
+      // macOS: Add window position (menu bar offset is included in windowPos.y)
+      x = relativeX + logicalWindowPos.x;
+      y = relativeY + logicalWindowPos.y;
+    } else {
+      // Windows/Linux: Subtract window position offset
+      x = relativeX + overlayScreenX - logicalWindowPos.x;
+      y = relativeY + overlayScreenY - logicalWindowPos.y;
+    }
 
     // Validate ROI size (minimum 10x10 pixels)
     if (width >= 10 && height >= 10) {

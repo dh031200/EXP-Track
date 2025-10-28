@@ -42,7 +42,7 @@ impl ScreenCapture {
 
         Ok(Self {
             monitor: SendSyncMonitor(monitor),
-            scale_factor
+            scale_factor,
         })
     }
 
@@ -59,7 +59,7 @@ impl ScreenCapture {
 
         Ok(Self {
             monitor: SendSyncMonitor(monitor),
-            scale_factor
+            scale_factor,
         })
     }
 
@@ -74,6 +74,10 @@ impl ScreenCapture {
         // Convert RgbaImage to DynamicImage
         let image = DynamicImage::ImageRgba8(rgba_image);
 
+        // Note: Platform-specific coordinate adjustment is handled in frontend
+        // macOS: Frontend adds window position (includes menu bar offset)
+        // Windows: Frontend subtracts window frame offset
+        
         // Apply scale factor to convert logical coordinates to physical pixels
         // On 125% scale: logical 100x100 → physical 125x125
         // On macOS Retina (2.0): logical 100x100 → physical 200x200
@@ -115,12 +119,21 @@ impl ScreenCapture {
             .height()
             .map_err(|e| format!("Failed to get height: {}", e))?;
 
-        // Convert physical pixels to logical coordinates
+        // On macOS, xcap already returns logical coordinates, not physical
+        // So we should NOT divide by scale_factor
+        #[cfg(target_os = "macos")]
+        {
+            return Ok((physical_width, physical_height));
+        }
+        
+        // On Windows/Linux, convert physical pixels to logical coordinates
         // On 125% scale: physical 2400x1350 → logical 1920x1080
-        let logical_width = (physical_width as f64 / self.scale_factor) as u32;
-        let logical_height = (physical_height as f64 / self.scale_factor) as u32;
-
-        Ok((logical_width, logical_height))
+        #[cfg(not(target_os = "macos"))]
+        {
+            let logical_width = (physical_width as f64 / self.scale_factor) as u32;
+            let logical_height = (physical_height as f64 / self.scale_factor) as u32;
+            Ok((logical_width, logical_height))
+        }
     }
 
     /// Convert image to PNG bytes for transmission
