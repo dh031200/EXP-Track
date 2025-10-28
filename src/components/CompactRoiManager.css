@@ -1,12 +1,12 @@
 .compact-roi-manager {
-  padding: 4px 8px;
+  padding: 8px;
   width: 100%;
 }
 
 .roi-buttons {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 8px;
+  gap: 10px;
 }
 
 .roi-button-group {
@@ -20,7 +20,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 10px;
+  padding: 10px 12px;
   background: white;
   border: 2px solid;
   border-radius: 6px;
@@ -29,6 +29,7 @@
   font-size: 13px;
   font-weight: 500;
   position: relative;
+  min-height: 44px;
 }
 
 .roi-select-btn:hover:not(:disabled) {
@@ -46,9 +47,10 @@
 }
 
 .roi-icon-img {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   object-fit: contain;
+  flex-shrink: 0;
 }
 
 .roi-label {
@@ -58,8 +60,9 @@
 }
 
 .roi-check {
-  font-size: 14px;
+  font-size: 16px;
   color: #4CAF50;
+  flex-shrink: 0;
 }
 
 .roi-actions-compact {
@@ -68,8 +71,8 @@
 }
 
 .roi-action-btn {
-  width: 30px;
-  height: 30px;
+  width: 34px;
+  height: 34px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -78,8 +81,9 @@
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.15s ease;
-  font-size: 14px;
+  font-size: 15px;
   padding: 0;
+  flex-shrink: 0;
 }
 
 .roi-action-btn:hover {

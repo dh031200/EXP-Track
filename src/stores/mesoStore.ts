@@ -7,8 +7,8 @@ interface MesoState {
   hpPotionPrice: number;
   mpPotionPrice: number;
 
-  setStartMeso: (meso: number) => void;
-  setEndMeso: (meso: number) => void;
+  setStartMeso: (meso: number | null) => void;
+  setEndMeso: (meso: number | null) => void;
   setHpPotionPrice: (price: number) => void;
   setMpPotionPrice: (price: number) => void;
   resetSession: () => void;
@@ -26,9 +26,9 @@ export const useMesoStore = create<MesoState>()(
       hpPotionPrice: 0,
       mpPotionPrice: 0,
 
-      setStartMeso: (meso: number) => set({ startMeso: meso }),
+      setStartMeso: (meso: number | null) => set({ startMeso: meso }),
       
-      setEndMeso: (meso: number) => set({ endMeso: meso }),
+      setEndMeso: (meso: number | null) => set({ endMeso: meso }),
       
       setHpPotionPrice: (price: number) => set({ hpPotionPrice: Math.max(0, price) }),
       

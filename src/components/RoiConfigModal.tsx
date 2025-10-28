@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { CompactRoiManager } from './CompactRoiManager';
 import './RoiConfigModal.css';
 
@@ -18,6 +19,12 @@ export function RoiConfigModal({ isOpen, onClose, onSelectingChange }: RoiConfig
     onSelectingChange?.(selecting);
   };
 
+  const handleDragStart = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    const window = getCurrentWindow();
+    await window.startDragging();
+  };
+
   return (
     <>
       {/* Backdrop */}
@@ -29,12 +36,13 @@ export function RoiConfigModal({ isOpen, onClose, onSelectingChange }: RoiConfig
 
       {/* Modal */}
       <div className="modal-container" style={{ display: isSelecting ? 'none' : 'flex' }}>
-        <div className="modal-header">
+        <div className="modal-header" onMouseDown={handleDragStart}>
           <h2>영역 설정</h2>
           {!isSelecting && (
             <button
               className="modal-close-btn"
               onClick={onClose}
+              onMouseDown={(e) => e.stopPropagation()}
               title="닫기"
             >
               ×

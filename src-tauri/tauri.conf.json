@@ -14,12 +14,12 @@
     "windows": [
       {
         "title": "exp-tracker",
-        "width": 720,
-        "height": 225,
-        "minWidth": 700,
-        "minHeight": 100,
-        "maxWidth": 950,
-        "maxHeight": 600,
+        "width": 425,
+        "height": 140,
+        "minWidth": 425,
+        "minHeight": 140,
+        "maxWidth": 800,
+        "maxHeight": 200,
         "resizable": true,
         "transparent": true,
         "decorations": false,
