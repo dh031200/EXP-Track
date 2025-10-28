@@ -110,12 +110,6 @@ export function RoiSelector({ onRoiSelected, onCancel }: RoiSelectorProps) {
     const overlayScreenX = overlayRect ? overlayRect.left : 0;
     const overlayScreenY = overlayRect ? overlayRect.top : 0;
 
-    console.log('🖱️ ROI Selection Debug:');
-    console.log('  Window dimensions:', dimensions);
-    console.log('  Window position (logical):', { x: logicalWindowPos.x, y: logicalWindowPos.y });
-    console.log('  Overlay screen position:', { x: overlayScreenX, y: overlayScreenY });
-    console.log('  Selected ROI (relative to overlay):', { startX, startY, currentX, currentY });
-
     // Calculate ROI bounds (relative to overlay)
     const relativeX = Math.round(Math.min(startX, currentX));
     const relativeY = Math.round(Math.min(startY, currentY));
@@ -123,12 +117,13 @@ export function RoiSelector({ onRoiSelected, onCancel }: RoiSelectorProps) {
     const height = Math.round(Math.abs(currentY - startY));
 
     // Convert to absolute screen coordinates
-    const x = relativeX + overlayScreenX;
-    const y = relativeY + overlayScreenY;
-
-    console.log('  Selected ROI (relative):', { x: relativeX, y: relativeY, width, height });
-    console.log('  Selected ROI (absolute):', { x, y, width, height });
-    console.log('  Device Pixel Ratio:', window.devicePixelRatio);
+    // On Windows, the window frame/shadow causes an offset even when positioned at (0,0)
+    // Example: Set position to (0,0) but window actually at (-8,-8) or (8,8) due to frame
+    // overlayRect gives us the overlay's screen position
+    // logicalWindowPos gives us the actual window position
+    // Real screen coords = relative + overlay position - window position offset
+    const x = relativeX + overlayScreenX - logicalWindowPos.x;
+    const y = relativeY + overlayScreenY - logicalWindowPos.y;
 
     // Validate ROI size (minimum 10x10 pixels)
     if (width >= 10 && height >= 10) {

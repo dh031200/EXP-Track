@@ -68,20 +68,11 @@ export function bytesToDataUrl(bytes: number[]): string {
  * DEBUG VERSION: NO ERROR HANDLING - Let errors crash to see real cause
  */
 export async function maximizeWindowForROI(): Promise<WindowState> {
-  console.log('=== START maximizeWindowForROI ===');
-
-  console.log('[1/7] Getting current window...');
   const window = getCurrentWindow();
-  console.log('[1/7] ✅ Window object:', window);
 
   // Save current state
-  console.log('[2/7] Getting window.innerSize()...');
   const size = await window.innerSize();
-  console.log('[2/7] ✅ Window size:', size);
-
-  console.log('[3/7] Getting window.outerPosition()...');
   const position = await window.outerPosition();
-  console.log('[3/7] ✅ Window position:', position);
 
   // Convert to logical coordinates for consistency (HiDPI-aware)
   const logicalSize = size.toLogical(await window.scaleFactor());
@@ -93,12 +84,9 @@ export async function maximizeWindowForROI(): Promise<WindowState> {
     x: logicalPosition.x,
     y: logicalPosition.y,
   };
-  console.log('[3/7] ✅ Original state saved (logical):', originalState);
 
   // Get screen dimensions
-  console.log('[4/7] Calling getScreenDimensions() Tauri command...');
   const [screenWidth, screenHeight] = await getScreenDimensions();
-  console.log('[4/7] ✅ Screen dimensions:', screenWidth, 'x', screenHeight);
 
   // Resize to almost full screen (leave small margin for visibility)
   const margin = 0;
@@ -107,28 +95,11 @@ export async function maximizeWindowForROI(): Promise<WindowState> {
   const newWidth = screenWidth - margin * 2;
   const newHeight = screenHeight - margin * 2;
 
-  console.log('[5/7] Calling window.setPosition()...', { x: newX, y: newY });
   // Use LogicalPosition for proper HiDPI support on macOS (e.g., 3840x2160 → 1920x1080)
   await window.setPosition(new LogicalPosition(newX, newY));
-  console.log('[5/7] ✅ Position set successfully');
 
-  console.log('[6/7] Calling window.setSize()...', { width: newWidth, height: newHeight });
   // Use LogicalSize for proper HiDPI support on macOS (fills screen correctly)
   await window.setSize(new LogicalSize(newWidth, newHeight));
-  console.log('[6/7] ✅ Size set successfully');
-
-  // Verify actual window position (may differ due to Windows shadow effects)
-  const actualPosition = await window.outerPosition();
-  const actualLogicalPos = actualPosition.toLogical(await window.scaleFactor());
-  console.log('[7/7] 📍 Actual window position:', { 
-    x: actualLogicalPos.x, 
-    y: actualLogicalPos.y,
-    offsetX: actualLogicalPos.x - newX,
-    offsetY: actualLogicalPos.y - newY
-  });
-
-  console.log('[7/7] ✅ Window maximized successfully');
-  console.log('=== END maximizeWindowForROI ===');
 
   return originalState;
 }
