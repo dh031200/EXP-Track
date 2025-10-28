@@ -10,7 +10,7 @@ pub type ScreenCaptureState = Mutex<Option<ScreenCapture>>;
 #[tauri::command]
 pub fn init_screen_capture(state: State<ScreenCaptureState>) -> Result<(), String> {
     let capture = ScreenCapture::new()?;
-    let mut state_guard = state.lock().map_err(|e| format!("Failed to lock state: {}", e))?;
+    let mut state_guard = state.inner().lock().map_err(|e| format!("Failed to lock state: {}", e))?;
     *state_guard = Some(capture);
     Ok(())
 }
@@ -18,7 +18,7 @@ pub fn init_screen_capture(state: State<ScreenCaptureState>) -> Result<(), Strin
 /// Get monitor dimensions (logical width/height)
 #[tauri::command]
 pub fn get_screen_dimensions(state: State<ScreenCaptureState>) -> Result<(u32, u32), String> {
-    let state_guard = state.lock().map_err(|e| format!("Failed to lock state: {}", e))?;
+    let state_guard = state.inner().lock().map_err(|e| format!("Failed to lock state: {}", e))?;
     let capture = state_guard
         .as_ref()
         .ok_or("Screen capture not initialized")?;
@@ -31,7 +31,7 @@ pub fn capture_region(
     state: State<ScreenCaptureState>,
     roi: Roi,
 ) -> Result<Vec<u8>, String> {
-    let state_guard = state.lock().map_err(|e| format!("Failed to lock state: {}", e))?;
+    let state_guard = state.inner().lock().map_err(|e| format!("Failed to lock state: {}", e))?;
     let capture = state_guard
         .as_ref()
         .ok_or("Screen capture not initialized")?;
@@ -43,7 +43,7 @@ pub fn capture_region(
 /// Capture full screen and return as PNG bytes (base64 encoded)
 #[tauri::command]
 pub fn capture_full_screen(state: State<ScreenCaptureState>) -> Result<Vec<u8>, String> {
-    let state_guard = state.lock().map_err(|e| format!("Failed to lock state: {}", e))?;
+    let state_guard = state.inner().lock().map_err(|e| format!("Failed to lock state: {}", e))?;
     let capture = state_guard
         .as_ref()
         .ok_or("Screen capture not initialized")?;

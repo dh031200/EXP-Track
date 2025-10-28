@@ -11,11 +11,12 @@ name = "exp_tracker_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2.1", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["macos-private-api"] }
-tauri-plugin-opener = "2"
+tauri = { version = "2.1", features = ["macos-private-api"] }
+tauri-plugin-opener = "2.1"
+tauri-plugin-global-shortcut = "2.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }

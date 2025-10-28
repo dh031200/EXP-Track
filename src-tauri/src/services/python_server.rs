@@ -52,16 +52,22 @@ impl PythonServerManager {
             .ok_or("Failed to get exe parent dir")?
             .to_path_buf();
 
+        // Platform-specific executable name
+        #[cfg(target_os = "windows")]
+        let exe_name = "ocr_server.exe";
+        #[cfg(not(target_os = "windows"))]
+        let exe_name = "ocr_server";
+
         // Look for ocr_server directory in resources (for bundled app)
         let server_dir = exe_dir.join("../Resources/resources/ocr_server");
-        let server_bin = server_dir.join("ocr_server");
+        let server_bin = server_dir.join(exe_name);
 
         // Fallback: look in src-tauri/resources (for development)
         let (server_dir, server_bin) = if server_bin.exists() {
             (server_dir, server_bin)
         } else {
             let dev_dir = exe_dir.join("resources/ocr_server");
-            let dev_bin = dev_dir.join("ocr_server");
+            let dev_bin = dev_dir.join(exe_name);
             (dev_dir, dev_bin)
         };
 

@@ -88,16 +88,18 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
     onSelectingChange?.(false);
 
     // Step 2: Restore window to original size
-    await setAlwaysOnTop(false);
     if (windowStateRef.current) {
       await restoreWindow(windowStateRef.current);
       windowStateRef.current = null;
     }
 
-    // Step 3: Wait 500ms for UI to settle
+    // Step 3: Restore always on top
+    await setAlwaysOnTop(true);
+
+    // Step 4: Wait 500ms for UI to settle
     await new Promise((resolve) => setTimeout(resolve, 500));
 
-    // Step 4: Capture the clean screen
+    // Step 5: Capture the clean screen
     try {
       const bytes = await captureRegion(roi);
       const dataUrl = bytesToDataUrl(bytes);
@@ -115,11 +117,13 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
   };
 
   const handleCancel = async () => {
-    await setAlwaysOnTop(false);
     if (windowStateRef.current) {
       await restoreWindow(windowStateRef.current);
       windowStateRef.current = null;
     }
+
+    // Restore always on top
+    await setAlwaysOnTop(true);
 
     await new Promise((resolve) => setTimeout(resolve, 100));
     setIsSelecting(false);

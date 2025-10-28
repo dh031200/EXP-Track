@@ -66,6 +66,7 @@
 - 플랫폼별 의존성: [Tauri 필수 요구사항](https://tauri.app/v2/guides/prerequisites/) 참조
 
 **설치 및 실행**
+### macOS
 ```bash
 # 의존성 설치
 npm install
@@ -75,6 +76,21 @@ cd python_ocr_server
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+
+# 개발 서버 실행
+npm run tauri dev
+```
+
+### Windows
+```cmd
+# node, rust, python(uv 패키지매니저), build tools 자동 설치 -> 최초 실행 시 y,y,y,y 이후에는 N, N
+.\scripts\build_python_server.bat
+
+# 의존성 설치
+npm install
+
+# 아이콘 생성
+npm run icon:generate
 
 # 개발 서버 실행
 npm run tauri dev
