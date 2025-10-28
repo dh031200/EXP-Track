@@ -37,7 +37,15 @@ export function RoiSelector({ onRoiSelected, onCancel }: RoiSelectorProps) {
       try {
         await initScreenCapture();
         const dims = await getScreenDimensions();
-        setDimensions(dims);
+        
+        // On macOS HiDPI, use actual viewport dimensions instead of backend dimensions
+        // window.innerWidth/Height already accounts for device pixel ratio
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+        
+
+        // Use viewport dimensions for overlay sizing (handles HiDPI correctly)
+        setDimensions([viewportWidth, viewportHeight]);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to initialize screen capture');
       }
@@ -92,16 +100,57 @@ export function RoiSelector({ onRoiSelected, onCancel }: RoiSelectorProps) {
     }));
   };
 
-  const handleMouseUp = () => {
+  const handleMouseUp = async () => {
     if (!dragState.isDrawing) return;
 
     const { startX, startY, currentX, currentY } = dragState;
 
-    // Calculate ROI bounds
-    const x = Math.round(Math.min(startX, currentX));
-    const y = Math.round(Math.min(startY, currentY));
+    // Get actual window position at selection time
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    const currentWindow = getCurrentWindow();
+    const windowPos = await currentWindow.outerPosition();
+    const scaleFactor = await currentWindow.scaleFactor();
+    const logicalWindowPos = windowPos.toLogical(scaleFactor);
+
+    // Get overlay position (may differ from window position due to frame/titlebar)
+    const overlay = overlayRef.current;
+    const overlayRect = overlay?.getBoundingClientRect();
+    const overlayScreenX = overlayRect ? overlayRect.left : 0;
+    const overlayScreenY = overlayRect ? overlayRect.top : 0;
+
+    // Calculate ROI bounds (relative to overlay)
+    const relativeX = Math.round(Math.min(startX, currentX));
+    const relativeY = Math.round(Math.min(startY, currentY));
     const width = Math.round(Math.abs(currentX - startX));
     const height = Math.round(Math.abs(currentY - startY));
+
+    // Detect platform
+    const isMacOS = navigator.platform.includes('Mac');
+    
+    // Convert to absolute screen coordinates
+    // Platform-specific coordinate calculation:
+    //
+    // macOS:
+    //   - Window at (0, 31) means content starts at screen position (0, 31)
+    //   - Overlay fills window content
+    //   - Screen coords = overlay coords + window position
+    //
+    // Windows:
+    //   - Window frame/shadow causes offset when positioned at (0,0)
+    //   - Example: Set position to (0,0) but actually at (-8,-8) due to frame
+    //   - getBoundingClientRect() gives actual screen position including frame
+    //   - Screen coords = overlay coords + overlay screen position - window position offset
+    
+    let x, y;
+    if (isMacOS) {
+      // macOS: Add window position (menu bar offset is included in windowPos.y)
+      x = relativeX + logicalWindowPos.x;
+      y = relativeY + logicalWindowPos.y;
+    } else {
+      // Windows/Linux: Subtract window position offset
+      x = relativeX + overlayScreenX - logicalWindowPos.x;
+      y = relativeY + overlayScreenY - logicalWindowPos.y;
+    }
 
     // Validate ROI size (minimum 10x10 pixels)
     if (width >= 10 && height >= 10) {

@@ -3,16 +3,17 @@ mod models;
 mod services;
 mod utils;
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 use commands::config::{
     clear_roi, get_all_rois, get_config_path, init_config_manager, load_config, load_roi,
-    open_roi_preview, save_config, save_roi, save_roi_preview, ConfigManagerState,
+    open_roi_preview, save_config, save_roi, save_roi_preview,
 };
 use commands::ocr::{
     init_ocr_service, recognize_all_parallel, recognize_exp, recognize_hp_potion_count, recognize_level,
     check_ocr_health,
-    recognize_map, recognize_mp_potion_count, OcrServiceState,
+    recognize_map, recognize_mp_potion_count,
 };
 use commands::screen_capture::{
     capture_full_screen, capture_region, get_screen_dimensions, init_screen_capture,
@@ -52,6 +53,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(ScreenCaptureState::default())
         .manage(config_manager)
         .manage(ocr_service)
@@ -62,6 +64,21 @@ pub fn run() {
             let tracker_state = TrackerState::new(app.handle().clone())
                 .expect("Failed to initialize OCR tracker");
             app.manage(tracker_state);
+
+            // Register global shortcut for ` (backtick/tilde) key
+            let handle = app.handle().clone();
+            app.global_shortcut().on_shortcut("`", move |_app, _shortcut, event| {
+                if event.state == ShortcutState::Pressed {
+                    #[cfg(debug_assertions)]
+                    println!("🎹 Global shortcut triggered: `");
+                    
+                    // Emit event to frontend
+                    let _ = handle.emit("global-shortcut-toggle-timer", ());
+                }
+            }).expect("Failed to register global shortcut");
+
+            #[cfg(debug_assertions)]
+            println!("✅ Global shortcut registered: `");
 
             // Start Python OCR server on app startup
             let handle = app.handle().clone();
@@ -96,7 +113,7 @@ pub fn run() {
                     // Stop OCR tracking
                     let tracker_state = app.state::<TrackerState>();
                     {
-                        let tracker = tracker_state.0.lock().await;
+                        let tracker = tracker_state.inner().0.lock().await;
                         tracker.stop_tracking().await;
 
                         #[cfg(debug_assertions)]

@@ -87,7 +87,7 @@ pub fn parse_exp(text: &str) -> Result<ExpData, String> {
 
         let exp_end = m.start();
         let exp_part = &clean[..exp_end];
-        let mut exp_str: String = exp_part.chars().filter(|c| c.is_ascii_digit()).collect();
+        let exp_str: String = exp_part.chars().filter(|c| c.is_ascii_digit()).collect();
 
         if exp_str.is_empty() {
             return Err(format!("No absolute value found before percentage in: {}", text));
@@ -134,7 +134,7 @@ pub fn parse_exp(text: &str) -> Result<ExpData, String> {
             }
 
             let exp_part = &clean[..exp_end];
-            let mut exp_str: String = exp_part.chars().filter(|c| c.is_ascii_digit()).collect();
+            let exp_str: String = exp_part.chars().filter(|c| c.is_ascii_digit()).collect();
 
             if exp_str.is_empty() {
                 return Err(format!("No absolute value found before percentage in: {}", text));

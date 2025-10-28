@@ -14,10 +14,12 @@ node_modules
 dist
 dist-ssr
 *.local
+*.bak
 
 # Tauri / Rust
 src-tauri/target/
 src-tauri/Cargo.lock
+target/
 
 # Generated icons (keep only the source EXP_Tracker.png)
 src-tauri/icons/*
@@ -47,7 +49,7 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
-
+*.zip
 
 # Development documentation
 devdocs/
@@ -82,3 +84,4 @@ test_*.py
 # External library clones
 rapid/
 rapidocr/
+python_ocr_server/ocr_server.spec
