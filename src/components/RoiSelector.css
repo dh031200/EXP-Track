@@ -3,8 +3,9 @@
   position: fixed;
   top: 0;
   left: 0;
-  width: 100vw;
-  height: 100vh;
+  /* Use 100vw/100vh which handles DPI correctly in browsers */
+  width: 100vw !important;
+  height: 100vh !important;
   z-index: 9999;
   background: rgba(0, 0, 0, 0.3); /* Semi-transparent to indicate selection mode */
   user-select: none;

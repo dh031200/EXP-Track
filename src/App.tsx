@@ -1,10 +1,10 @@
 import { useState, useCallback, useEffect } from "react";
-import { getCurrentWindow } from '@tauri-apps/api/window';
+import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { listen } from '@tauri-apps/api/event';
 import { RoiConfigModal } from "./components/RoiConfigModal";
 import { Settings } from "./components/Settings";
 import { TimerSettingsModal } from "./components/TimerSettingsModal";
-import { ExpTrackerDisplay } from "./components/ExpTrackerDisplay";
 import { useSettingsStore } from "./stores/settingsStore";
 import { useRoiStore } from "./stores/roiStore";
 import { useTrackingStore } from "./stores/trackingStore";
@@ -23,6 +23,8 @@ import roiIcon from "/icons/roi.png";
 import settingIcon from "/icons/setting.png";
 import historyIcon from "/icons/history.png";
 import timerIcon from "/icons/timer.png";
+import hpIcon from "/icons/hp.png";
+import mpIcon from "/icons/mp.png";
 
 function App() {
   const [isSelecting, setIsSelecting] = useState(false);
@@ -40,6 +42,7 @@ function App() {
   const [ocrHealthy, setOcrHealthy] = useState(false);
 
   const backgroundOpacity = useSettingsStore((state) => state.backgroundOpacity);
+  const targetDuration = useSettingsStore((state) => state.targetDuration);
   const { levelRoi, expRoi } = useRoiStore();
   const {
     state: trackingState,
@@ -80,6 +83,21 @@ function App() {
     initCapture();
   }, []); // Run only once on mount
 
+  // Ensure window is always on top
+  useEffect(() => {
+    const ensureAlwaysOnTop = async () => {
+      try {
+        const window = getCurrentWindow();
+        await window.setAlwaysOnTop(true);
+        console.log('✅ Window set to always on top');
+      } catch (error) {
+        console.error('❌ Failed to set always on top:', error);
+      }
+    };
+
+    ensureAlwaysOnTop();
+  }, []);
+
   // OCR health check polling - check every 3 seconds until healthy
   useEffect(() => {
     const checkHealth = async () => {
@@ -116,6 +134,30 @@ function App() {
       return () => clearInterval(interval);
     }
   }, [trackingState, incrementTimer, elapsedSeconds, pausedSeconds, updateSessionDuration]);
+
+  // Global shortcut: ` (backtick) to toggle tracking
+  useEffect(() => {
+    const unlisten = listen('global-shortcut-toggle-timer', () => {
+      // Don't trigger if user is in settings or selecting ROI
+      if (showSettings || isSelecting || showRoiModal) {
+        return;
+      }
+
+      // Don't trigger if ROI is not set or OCR is not healthy
+      if (!hasAnyRoi || !ocrHealthy) {
+        console.log('⚠️ Global shortcut: ROI not set or OCR not healthy');
+        return;
+      }
+
+      console.log('🎹 Global shortcut: Toggling tracking');
+      handleToggleTracking();
+    });
+
+    return () => {
+      unlisten.then(fn => fn());
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasAnyRoi, ocrHealthy, showSettings, isSelecting, showRoiModal, trackingState]);
 
   // Record EXP data points every minute for per-interval calculation
   useEffect(() => {
@@ -247,52 +289,78 @@ function App() {
 
   const averageData = calculateAverage();
 
-  // Calculate HP/MP potion usage per minute (based on recent interval)
-  const calculatePotionUsage = (): { hpPerMinute: number; mpPerMinute: number } => {
+
+  // Calculate level up ETA
+  const calculateLevelUpETA = (): string => {
     const stats = parallelOcrTracker.stats;
-    if (!stats || stats.elapsed_seconds === 0) {
-      return { hpPerMinute: 0, mpPerMinute: 0 };
+    if (!stats || !stats.level || stats.exp_per_hour === 0) {
+      return '−';
     }
 
-    const intervalMinutes = {
-      'none': 0,
-      '1min': 1,
-      '5min': 5,
-      '10min': 10,
-      '30min': 30,
-      '1hour': 60,
-    }[selectedAverageInterval] || 0;
-    const intervalSeconds = intervalMinutes * 60;
-    const now = Date.now();
-    const windowStart = now - (intervalSeconds * 1000);
-
-    // Filter data points within the interval
-    const relevantPoints = expDataPoints.filter(p => p.timestamp >= windowStart);
-
-    if (relevantPoints.length >= 2) {
-      const firstPoint = relevantPoints[0];
-      const lastPoint = relevantPoints[relevantPoints.length - 1];
-      const hpUsed = lastPoint.hpPotions - firstPoint.hpPotions;
-      const mpUsed = lastPoint.mpPotions - firstPoint.mpPotions;
-      const timeElapsed = (lastPoint.timestamp - firstPoint.timestamp) / 1000 / 60; // in minutes
-
-      if (timeElapsed > 0) {
-        return {
-          hpPerMinute: hpUsed / timeElapsed,
-          mpPerMinute: mpUsed / timeElapsed,
-        };
-      }
-    }
-
-    // Not enough data points, use total average
-    const elapsedMinutes = stats.elapsed_seconds / 60;
-    return {
-      hpPerMinute: elapsedMinutes > 0 ? stats.hp_potions_used / elapsedMinutes : 0,
-      mpPerMinute: elapsedMinutes > 0 ? stats.mp_potions_used / elapsedMinutes : 0,
+    // Official Mapleland EXP table (Levels 1-200)
+    const expTable: { [key: number]: number } = {
+      1: 15, 2: 34, 3: 57, 4: 92, 5: 135, 6: 372, 7: 560, 8: 840, 9: 1242, 10: 1716,
+      11: 2360, 12: 3216, 13: 4200, 14: 5460, 15: 7050, 16: 8840, 17: 11040, 18: 13716, 19: 16680, 20: 20216,
+      21: 24402, 22: 28980, 23: 34320, 24: 40512, 25: 54900, 26: 57210, 27: 63666, 28: 73080, 29: 83270, 30: 95700,
+      31: 108480, 32: 122760, 33: 138666, 34: 155540, 35: 174216, 36: 194832, 37: 216600, 38: 240550, 39: 266682, 40: 294216,
+      41: 324240, 42: 356916, 43: 391160, 44: 428280, 45: 468450, 46: 510420, 47: 555680, 48: 604416, 49: 655200, 50: 709716,
+      51: 748608, 52: 789631, 53: 832902, 54: 878545, 55: 926689, 56: 977471, 57: 1031036, 58: 1087536, 59: 1147132, 60: 1209904,
+      61: 1276301, 62: 1346242, 63: 1420016, 64: 1497832, 65: 1579913, 66: 1666492, 67: 1757185, 68: 1854143, 69: 1955750, 70: 2062925,
+      71: 2175973, 72: 2295216, 73: 2420993, 74: 2553663, 75: 2693603, 76: 2841212, 77: 2996910, 78: 3161140, 79: 3334370, 80: 3517903,
+      81: 3709827, 82: 3913127, 83: 4127556, 84: 4353756, 85: 4592341, 86: 4844001, 87: 5109452, 88: 5389449, 89: 5684790, 90: 5996316,
+      91: 6324914, 92: 6617519, 93: 7037118, 94: 7422752, 95: 7829518, 96: 8258575, 97: 8711144, 98: 9188514, 99: 9620440, 100: 10223168,
+      101: 10783397, 102: 11374327, 103: 11997640, 104: 12655110, 105: 13348610, 106: 14080113, 107: 14851703, 108: 15665576, 109: 16524049, 110: 17429566,
+      111: 18384706, 112: 19392187, 113: 20454878, 114: 21575805, 115: 22758159, 116: 24005306, 117: 25320796, 118: 26708375, 119: 28171993, 120: 29715818,
+      121: 31344244, 122: 33061908, 123: 34873700, 124: 36784778, 125: 38800583, 126: 40926854, 127: 43169645, 128: 45535341, 129: 48030677, 130: 50662758,
+      131: 53439077, 132: 56367538, 133: 59456479, 134: 62714694, 135: 66151459, 136: 69776558, 137: 73600313, 138: 77633610, 139: 81887931, 140: 86375389,
+      141: 91108760, 142: 96101520, 143: 101367883, 144: 106922842, 145: 112782213, 146: 118962678, 147: 125481832, 148: 132358236, 149: 139611467, 150: 147262175,
+      151: 155332142, 152: 163844343, 153: 172823012, 154: 182293713, 155: 192283408, 156: 202820538, 157: 213935103, 158: 225658746, 159: 238024845, 160: 251068606,
+      161: 264827165, 162: 279339693, 163: 294647508, 164: 310794191, 165: 327825712, 166: 345790561, 167: 364739883, 168: 384727628, 169: 405810702, 170: 428049128,
+      171: 451506220, 172: 476248760, 173: 502347192, 174: 529875818, 175: 558913012, 176: 589541445, 177: 621848316, 178: 655925603, 179: 691870326, 180: 729784819,
+      181: 769777027, 182: 811960808, 183: 856456260, 184: 903390063, 185: 952895838, 186: 1005114529, 187: 1060194805, 188: 1118293480, 189: 1179575962, 190: 1244216724,
+      191: 1312399800, 192: 1384319309, 193: 1460180007, 194: 1540197871, 195: 1624600714, 196: 1713628833, 197: 1807535693, 198: 1906588648, 199: 2011069705, 200: 2121276324
     };
+
+    const currentLevel = stats.level;
+    const currentPercentage = stats.percentage || 0;
+    
+    // Validate level range
+    if (currentLevel < 1 || currentLevel >= 200) {
+      return '−';
+    }
+    
+    // Get exp for current and next level
+    const currentLevelExp = expTable[currentLevel];
+    const nextLevelExp = expTable[currentLevel + 1];
+    
+    if (!currentLevelExp || !nextLevelExp) {
+      return '−';
+    }
+    
+    // Calculate remaining exp to next level
+    const expForLevel = nextLevelExp - currentLevelExp;
+    const currentExpInLevel = Math.floor(expForLevel * currentPercentage / 100);
+    const remainingExp = expForLevel - currentExpInLevel;
+    
+    // Calculate hours needed
+    const hoursNeeded = remainingExp / stats.exp_per_hour;
+    
+    if (hoursNeeded < 0 || !isFinite(hoursNeeded)) {
+      return '−';
+    }
+    
+    // Format as hours and minutes
+    const hours = Math.floor(hoursNeeded);
+    const minutes = Math.floor((hoursNeeded - hours) * 60);
+    
+    if (hours > 999) {
+      return '999h+';
+    }
+    
+    return `${hours}h ${minutes}m`;
   };
 
-  const potionUsage = calculatePotionUsage();
+  const levelUpETA = calculateLevelUpETA();
 
   // Get interval label for display
   const intervalLabel = {
@@ -308,9 +376,29 @@ function App() {
     setIsSelecting(selecting);
   }, []);
 
+  const handleOpenRoiModal = async () => {
+    setShowRoiModal(true);
+    const window = getCurrentWindow();
+    try {
+      await window.setSize(new LogicalSize(550, 300));
+    } catch (error) {
+      console.error('Failed to resize window:', error);
+    }
+  };
+
+  const handleCloseRoiModal = async () => {
+    setShowRoiModal(false);
+    const window = getCurrentWindow();
+    try {
+      await window.setSize(new LogicalSize(550, 120));
+    } catch (error) {
+      console.error('Failed to resize window:', error);
+    }
+  };
+
   const handleToggleTracking = async () => {
     if (!hasAnyRoi) {
-      setShowRoiModal(true);
+      await handleOpenRoiModal();
       return;
     }
 
@@ -359,6 +447,29 @@ function App() {
     await window.startDragging();
   };
 
+  // Handle settings view - resize window
+  const handleOpenSettings = async () => {
+    setShowSettings(true);
+    const window = getCurrentWindow();
+    try {
+      await window.setSize(new LogicalSize(550, 480));
+      await window.setAlwaysOnTop(true);
+    } catch (error) {
+      console.error('Failed to resize window:', error);
+    }
+  };
+
+  const handleCloseSettings = async () => {
+    setShowSettings(false);
+    const window = getCurrentWindow();
+    try {
+      await window.setSize(new LogicalSize(550, 120));
+      await window.setAlwaysOnTop(true);
+    } catch (error) {
+      console.error('Failed to resize window:', error);
+    }
+  };
+
   const handleOpenHistory = async () => {
     // Check if window already exists (getByLabel is async in Tauri 2.x)
     const existingWindow = await WebviewWindow.getByLabel('history');
@@ -397,81 +508,71 @@ function App() {
         height: '100vh',
         background: 'transparent',
         overflow: 'hidden',
-        borderRadius: isSelecting ? '0' : '12px',
+        borderRadius: isSelecting ? '0' : '10px',
         display: 'flex',
         flexDirection: 'column',
-        // Apply opacity to entire app (all elements together)
         opacity: isSelecting ? 1 : backgroundOpacity,
         position: 'relative'
       }}
     >
-      {/* Titlebar with integrated controls */}
-      {!isSelecting && (
-        <div
-          onMouseDown={handleDragStart}
+      {/* Main Container with Horizontal Layout */}
+      <main 
+        onMouseDown={!isSelecting && !showSettings ? handleDragStart : undefined}
           style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            height: '44px',
+          background: isSelecting ? 'transparent' : 'rgba(255, 255, 255, 0.98)',
+          height: '100%',
+          borderRadius: isSelecting ? '0' : '10px',
+          overflow: showSettings ? 'auto' : 'hidden',
+          boxSizing: 'border-box',
             display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: 'rgba(255, 255, 255, 0.98)',
-            borderTopLeftRadius: '12px',
-            borderTopRightRadius: '12px',
-            borderBottom: '1px solid rgba(0, 0, 0, 0.08)',
-            cursor: 'move',
-            userSelect: 'none',
-          }}
-        >
-          {/* Title text */}
-          <div style={{
-            fontSize: '12px',
-            fontWeight: '500',
-            color: 'rgba(0, 0, 0, 0.5)',
-            pointerEvents: 'none'
-          }}>
-            EXP Tracker
-          </div>
-
-          {/* Window controls - prevent drag on click */}
+          flexDirection: showSettings ? 'column' : 'row',
+          alignItems: showSettings ? 'stretch' : 'center',
+          padding: isSelecting ? '0' : showSettings ? '0' : '8px 20px',
+          paddingTop: isSelecting ? '0' : showSettings ? '0' : '35px',
+          paddingBottom: isSelecting ? '0' : showSettings ? '0' : '10px',
+          gap: '4px',
+          position: 'relative',
+          cursor: (!isSelecting && !showSettings) ? 'move' : 'default',
+          userSelect: showSettings ? 'auto' : 'none'
+        }}
+      >
+        {!isSelecting && !showSettings && (
+          <>
+            {/* Window Controls - Top Right */}
           <div
             onMouseDown={(e) => e.stopPropagation()}
             style={{
               position: 'absolute',
-              top: '6px',
-              right: '12px',
+              top: '8px',
+                right: '8px',
               display: 'flex',
-              gap: '8px',
+                gap: '4px',
+                zIndex: 100
             }}
           >
             <button
               onClick={handleMinimize}
               style={{
-                width: '32px',
-                height: '32px',
-                borderRadius: '8px',
+                  width: '20px',
+                  height: '20px',
+                  borderRadius: '4px',
                 border: 'none',
-                background: 'rgba(0, 0, 0, 0.4)',
+                  background: 'rgba(0, 0, 0, 0.3)',
                 color: '#fff',
-                fontSize: '20px',
+                  fontSize: '14px',
                 fontWeight: '300',
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 transition: 'all 0.15s ease',
-                paddingBottom: '4px',
+                  paddingBottom: '2px',
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'rgba(0, 0, 0, 0.6)';
-                e.currentTarget.style.transform = 'scale(1.05)';
+                  e.currentTarget.style.background = 'rgba(0, 0, 0, 0.5)';
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'rgba(0, 0, 0, 0.4)';
-                e.currentTarget.style.transform = 'scale(1)';
+                  e.currentTarget.style.background = 'rgba(0, 0, 0, 0.3)';
               }}
               title="Minimize"
             >
@@ -480,13 +581,13 @@ function App() {
             <button
               onClick={handleClose}
               style={{
-                width: '32px',
-                height: '32px',
-                borderRadius: '8px',
+                  width: '20px',
+                  height: '20px',
+                  borderRadius: '4px',
                 border: 'none',
                 background: 'rgba(255, 59, 48, 0.8)',
                 color: '#fff',
-                fontSize: '20px',
+                  fontSize: '14px',
                 fontWeight: '300',
                 cursor: 'pointer',
                 display: 'flex',
@@ -496,161 +597,74 @@ function App() {
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.background = '#ff3b30';
-                e.currentTarget.style.transform = 'scale(1.05)';
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.background = 'rgba(255, 59, 48, 0.8)';
-                e.currentTarget.style.transform = 'scale(1)';
               }}
               title="Close"
             >
               ×
             </button>
           </div>
-        </div>
-      )}
 
-      <main className="container" style={{
-        background: isSelecting ? 'transparent' : 'rgba(255, 255, 255, 0.98)',
-        marginTop: isSelecting ? '0' : '44px',
-        padding: isSelecting ? '0' : '8px 16px 30px 16px', /* top right bottom left - reduced top padding */
-        height: isSelecting ? '100%' : 'calc(100% - 44px)',
-        borderBottomLeftRadius: isSelecting ? '0' : '12px',
-        borderBottomRightRadius: isSelecting ? '0' : '12px',
-        overflow: isSelecting ? 'hidden' : 'hidden',
-        boxSizing: 'border-box',
+            {/* Section 1: 세션 시간 */}
+            <div 
+              onMouseDown={(e) => e.stopPropagation()}
+              style={{
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        justifyContent: 'flex-start', /* Align to top instead of center */
-        gap: '2px', /* Minimal gap between sections */
-        paddingTop: '20px', /* Add top padding to push content down from titlebar */
-        position: 'relative'
-      }}>
-        {!isSelecting && !showSettings && (
-          <>
-            {/* OCR Status Indicator - Top Left of main container */}
-            {(
+                justifyContent: 'center',
+                gap: '4px',
+                minWidth: '140px',
+                paddingRight: '12px',
+                borderRight: '1px solid rgba(0, 0, 0, 0.1)'
+              }}
+            >
+              {/* OCR Status + Control Buttons */}
               <div style={{
-                position: 'absolute',
-                top: '12px',
-                left: '12px',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '3px',
-                padding: '3px 6px',
-                background: 'rgba(0, 0, 0, 0.02)',
-                borderRadius: '4px',
-                zIndex: 10
+                gap: '6px',
+                marginBottom: '4px'
               }}>
-                <span style={{ fontSize: '10px', lineHeight: 1 }}>
-                  {ocrHealthy ? '🟢' : '🔴'}
-                </span>
-                <span style={{
-                  fontSize: '9px',
-                  fontWeight: 600,
-                  color: '#666',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px'
-                }}>OCR</span>
-              </div>
-            )}
-            {/* Central controls: Start/Pause toggle + Timer */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '20px',
-              justifyContent: 'center'
-            }}>
-              {/* Start/Pause Toggle Button */}
+                <span style={{ fontSize: '10px' }}>{ocrHealthy ? '🟢' : '🔴'}</span>
               <button
                 onClick={handleToggleTracking}
                 disabled={!hasAnyRoi || !ocrHealthy}
                 style={{
-                  width: '64px',
-                  height: '64px',
-                  borderRadius: '12px',
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '8px',
                   border: 'none',
-                  background: !hasAnyRoi
+                    background: !hasAnyRoi || !ocrHealthy
                     ? 'rgba(0, 0, 0, 0.1)'
                     : trackingState === 'tracking'
-                      ? 'linear-gradient(135deg, #FF9800 0%, #F57C00 100%)'
+                        ? 'linear-gradient(135deg, #2196F3 0%, #1976D2 100%)'
                       : 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)',
-                  cursor: hasAnyRoi ? 'pointer' : 'not-allowed',
+                    cursor: (hasAnyRoi && ocrHealthy) ? 'pointer' : 'not-allowed',
                   transition: 'all 0.2s ease',
-                  boxShadow: hasAnyRoi ? '0 4px 12px rgba(0, 0, 0, 0.15)' : 'none',
+                    boxShadow: (hasAnyRoi && ocrHealthy) ? '0 2px 6px rgba(0, 0, 0, 0.15)' : 'none',
                   padding: 0,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  opacity: hasAnyRoi ? 1 : 0.5
-                }}
-                onMouseEnter={(e) => {
-                  if (hasAnyRoi) {
-                    e.currentTarget.style.transform = 'scale(1.05)';
-                    e.currentTarget.style.boxShadow = '0 6px 16px rgba(0, 0, 0, 0.2)';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (hasAnyRoi) {
-                    e.currentTarget.style.transform = 'scale(1)';
-                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)';
-                  }
+                    opacity: (hasAnyRoi && ocrHealthy) ? 1 : 0.5
                 }}
                 title={!hasAnyRoi ? 'ROI 설정 필요' : trackingState === 'tracking' ? '일시정지' : '시작'}
               >
                 <img
                   src={trackingState === 'tracking' ? pauseIcon : startIcon}
                   alt={trackingState === 'tracking' ? 'Pause' : 'Start'}
-                  style={{ width: '36px', height: '36px' }}
+                    style={{ width: '20px', height: '20px' }}
                 />
               </button>
-
-              {/* Timer Display - Compact Size */}
-              <div style={{
-                fontSize: '32px',
-                fontWeight: '700',
-                color: trackingState === 'tracking' ? '#4CAF50' : '#666',
-                fontFamily: 'monospace',
-                letterSpacing: '2px',
-                textAlign: 'center'
-              }}>
-                {formatTime(elapsedSeconds)}
-              </div>
-            </div>
-
-
-            {/* EXP Tracker Display - Always visible for better UX */}
-            <div style={{
-              width: '100%',
-              maxWidth: '400px',
-              marginTop: '8px' /* Spacing between timer and cards */
-            }}>
-              <ExpTrackerDisplay
-                stats={parallelOcrTracker.stats}
-                isTracking={parallelOcrTracker.isRunning()}
-                error={null}
-                averageData={calculateAverage()}
-                calculationMode={averageCalculationMode}
-                intervalLabel={intervalLabel}
-                potionUsage={potionUsage}
-              />
-            </div>
-
-            {/* Average EXP Display removed - now integrated into ExpTrackerDisplay */}
-
-            {/* Bottom-left reset button */}
-            <div style={{
-              position: 'absolute',
-              bottom: '16px',
-              left: '16px'
-            }}>
               <button
                 onClick={handleReset}
                 disabled={trackingState === 'idle'}
                 style={{
-                  width: '30px',
-                  height: '30px',
+                    width: '24px',
+                    height: '24px',
                   borderRadius: '6px',
                   border: '1px solid rgba(0, 0, 0, 0.1)',
                   background: 'rgba(0, 0, 0, 0.05)',
@@ -662,162 +676,327 @@ function App() {
                   justifyContent: 'center',
                   opacity: trackingState !== 'idle' ? 1 : 0.3
                 }}
-                onMouseEnter={(e) => {
-                  if (trackingState !== 'idle') {
-                    e.currentTarget.style.background = 'rgba(0, 0, 0, 0.08)';
-                    e.currentTarget.style.transform = 'scale(1.05)';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'rgba(0, 0, 0, 0.05)';
-                  e.currentTarget.style.transform = 'scale(1)';
-                }}
                 title="리셋"
               >
-                <img
-                  src={resetIcon}
-                  alt="Reset"
-                  style={{ width: '20px', height: '20px' }}
-                />
+                  <img src={resetIcon} alt="Reset" style={{ width: '14px', height: '14px' }} />
               </button>
+              <button
+                  onClick={handleOpenRoiModal}
+                style={{
+                    width: '24px',
+                    height: '24px',
+                  background: 'rgba(0, 0, 0, 0.05)',
+                  border: '1px solid rgba(0, 0, 0, 0.1)',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                  padding: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+                  title="ROI 설정"
+                >
+                  <img src={roiIcon} alt="ROI" style={{ width: '14px', height: '14px' }} />
+              </button>
+              <button
+                  onClick={handleOpenSettings}
+                style={{
+                    width: '24px',
+                    height: '24px',
+                    background: 'rgba(0, 0, 0, 0.05)',
+                    border: '1px solid rgba(0, 0, 0, 0.1)',
+                  borderRadius: '6px',
+                    cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                  padding: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                    justifyContent: 'center'
+                }}
+                  title="설정"
+              >
+                  <img src={settingIcon} alt="Settings" style={{ width: '14px', height: '14px' }} />
+              </button>
+              </div>
+
+              {/* Timer */}
+              <div style={{
+                fontSize: '24px',
+                fontWeight: 600,
+                color: trackingState === 'tracking' ? '#2196F3' : '#666'
+              }}>
+                {formatTime(elapsedSeconds)}
+              </div>
+              <div style={{
+                fontSize: '15px',
+                fontWeight: 600,
+                color: '#999'
+              }}>
+                {targetDuration > 0 && trackingState === 'tracking' ? (
+                  (() => {
+                    const now = new Date();
+                    const targetTime = new Date(now.getTime() + (targetDuration * 60 - elapsedSeconds) * 1000);
+                    const hours = Math.floor(targetDuration / 60);
+                    const minutes = targetDuration % 60;
+                    
+                    let timeLabel = '';
+                    if (hours > 0 && minutes > 0) {
+                      timeLabel = `${hours}시간 ${minutes}분`;
+                    } else if (hours > 0) {
+                      timeLabel = `${hours}시간`;
+                    } else {
+                      timeLabel = `${minutes}분`;
+                    }
+                    
+                    const targetHours = targetTime.getHours().toString().padStart(2, '0');
+                    const targetMinutes = targetTime.getMinutes().toString().padStart(2, '0');
+                    const targetSeconds = targetTime.getSeconds().toString().padStart(2, '0');
+                    
+                    return `${timeLabel} 뒤: ${targetHours}:${targetMinutes}:${targetSeconds}`;
+                  })()
+                ) : (
+                  '세션 시간'
+                )}
+              </div>
             </div>
 
-            {/* Bottom-right menu buttons (Timer -> History -> ROI -> Settings) */}
+            {/* Section 2: 경험치 */}
             <div style={{
-              position: 'absolute',
-              bottom: '16px',
-              right: '16px',
+              flex: 1,
               display: 'flex',
-              gap: '6px'
+              flexDirection: 'column',
+              justifyContent: 'center',
+              gap: '6px',
+              paddingLeft: '12px',
+              paddingRight: '0px',
+              borderRight: '1px solid rgba(0, 0, 0, 0.1)'
             }}>
-              <button
-                onClick={() => setShowTimerSettings(true)}
-                style={{
-                  width: '30px',
-                  height: '30px',
-                  background: 'rgba(0, 0, 0, 0.05)',
-                  border: '1px solid rgba(0, 0, 0, 0.1)',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                  padding: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'rgba(0, 0, 0, 0.08)';
-                  e.currentTarget.style.transform = 'scale(1.05)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'rgba(0, 0, 0, 0.05)';
-                  e.currentTarget.style.transform = 'scale(1)';
-                }}
-                title="타이머 설정"
-              >
-                <img src={timerIcon} alt="Timer" style={{ width: '20px', height: '20px' }} />
-              </button>
-              <button
-                onClick={handleOpenHistory}
-                disabled={true}
-                style={{
-                  width: '30px',
-                  height: '30px',
-                  background: 'rgba(0, 0, 0, 0.03)',
-                  border: '1px solid rgba(0, 0, 0, 0.05)',
-                  borderRadius: '6px',
-                  cursor: 'not-allowed',
-                  transition: 'all 0.15s ease',
-                  padding: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  opacity: 0.4
-                }}
-                title="히스토리 (준비 중)"
-              >
-                <img src={historyIcon} alt="History" style={{ width: '20px', height: '20px' }} />
-              </button>
-              <button
-                onClick={() => setShowRoiModal(true)}
-                style={{
-                  width: '30px',
-                  height: '30px',
-                  background: 'rgba(0, 0, 0, 0.05)',
-                  border: '1px solid rgba(0, 0, 0, 0.1)',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                  padding: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'rgba(0, 0, 0, 0.08)';
-                  e.currentTarget.style.transform = 'scale(1.05)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'rgba(0, 0, 0, 0.05)';
-                  e.currentTarget.style.transform = 'scale(1)';
-                }}
-                title="ROI 설정"
-              >
-                <img src={roiIcon} alt="ROI" style={{ width: '20px', height: '20px' }} />
-              </button>
-              <button
-                onClick={() => setShowSettings(true)}
-                style={{
-                  width: '30px',
-                  height: '30px',
-                  background: 'rgba(0, 0, 0, 0.05)',
-                  border: '1px solid rgba(0, 0, 0, 0.1)',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                  padding: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'rgba(0, 0, 0, 0.08)';
-                  e.currentTarget.style.transform = 'scale(1.05)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'rgba(0, 0, 0, 0.05)';
-                  e.currentTarget.style.transform = 'scale(1)';
-                }}
-                title="설정"
-              >
-                <img src={settingIcon} alt="Settings" style={{ width: '20px', height: '20px' }} />
-              </button>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '90px'
+              }}>
+                <div>
+                  <div style={{
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    color: '#666'
+                  }}>
+                    레벨업까지
+                  </div>
+                  <div style={{
+                    fontSize: '18px',
+                    fontWeight: '700',
+                    color: '#d32f2f'
+                  }}>
+                    {levelUpETA}
+                  </div>
+                </div>
+                <div>
+                  <div style={{
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    color: '#666'
+                  }}>
+                    획득 경험치
+                  </div>
+                  <div style={{
+                    fontSize: '16px',
+                    fontWeight: '700',
+                    color: '#2196F3'
+                  }}>
+                    {parallelOcrTracker.stats?.total_exp?.toLocaleString('ko-KR') || '0'}
+                  </div>
+                </div>
+              </div>
+              <div style={{
+                fontSize: '13px',
+                color: '#666',
+                borderTop: '1px solid rgba(0, 0, 0, 0.05)',
+                paddingTop: '4px'
+              }}>
+                현재: Lv.{parallelOcrTracker.stats?.level || '?'} ({parallelOcrTracker.stats?.percentage?.toFixed(2) || '0.00'}%) | 시간당: {parallelOcrTracker.stats?.exp_per_hour?.toLocaleString('ko-KR') || '0'}
+              </div>
+            </div>
+
+            {/* Section 3: 포션 */}
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'center',
+              gap: '8px',
+              minWidth: '80px',
+              paddingLeft: '2px'
+            }}>
+              {/* HP Potion */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}>
+                <img src={hpIcon} alt="HP" style={{ width: '32px', height: '32px' }} />
+                <div style={{
+                  fontSize: '16px',
+                  fontWeight: '700',
+                  color: '#f44336'
+                }}>
+                  {parallelOcrTracker.stats?.hp_potions_used || 0}
+                </div>
+              </div>
+
+              {/* MP Potion */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}>
+                <img src={mpIcon} alt="MP" style={{ width: '32px', height: '32px' }} />
+                <div style={{
+                  fontSize: '16px',
+                  fontWeight: '700',
+                  color: '#2196F3'
+                }}>
+                  {parallelOcrTracker.stats?.mp_potions_used || 0}
+                </div>
+              </div>
             </div>
           </>
         )}
 
         {!isSelecting && showSettings && (
           <>
-            <button
-              onClick={() => setShowSettings(false)}
+            {/* Draggable Title Bar for Settings */}
+            <div
+              onMouseDown={handleDragStart}
               style={{
                 position: 'absolute',
-                top: '56px',
-                left: '12px',
-                padding: '6px 12px',
-                fontSize: '13px',
-                background: 'rgba(0, 0, 0, 0.05)',
-                color: '#666',
-                border: '1px solid rgba(0, 0, 0, 0.1)',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-                fontWeight: '500'
+                top: 0,
+                left: 0,
+                right: 0,
+                height: '40px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'move',
+                zIndex: 999,
+                userSelect: 'none'
               }}
             >
+              <span style={{
+                fontSize: '12px',
+                fontWeight: '600',
+                color: '#999'
+              }}>
+                설정
+              </span>
+            </div>
+
+            {/* Back Button */}
+              <button
+              onClick={handleCloseSettings}
+              onMouseDown={(e) => e.stopPropagation()}
+                style={{
+                position: 'absolute',
+                top: '8px',
+                left: '8px',
+                padding: '6px 12px',
+                fontSize: '13px',
+                background: 'rgba(255, 255, 255, 0.95)',
+                color: '#333',
+                border: '1px solid rgba(0, 0, 0, 0.2)',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                fontWeight: '600',
+                zIndex: 1000,
+                boxShadow: '0 2px 6px rgba(0, 0, 0, 0.1)'
+                }}
+                onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(240, 240, 240, 1)';
+                  e.currentTarget.style.transform = 'scale(1.05)';
+                }}
+                onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.95)';
+                  e.currentTarget.style.transform = 'scale(1)';
+                }}
+              >
               ← 뒤로
+              </button>
+
+            {/* Window Controls */}
+            <div
+              onMouseDown={(e) => e.stopPropagation()}
+              style={{
+                position: 'absolute',
+                top: '6px',
+                right: '8px',
+                display: 'flex',
+                gap: '4px',
+                zIndex: 1000
+              }}
+            >
+              <button
+                onClick={handleMinimize}
+                style={{
+                  width: '20px',
+                  height: '20px',
+                  borderRadius: '4px',
+                  border: 'none',
+                  background: 'rgba(0, 0, 0, 0.3)',
+                  color: '#fff',
+                  fontSize: '14px',
+                  fontWeight: '300',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'all 0.15s ease',
+                  paddingBottom: '2px',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(0, 0, 0, 0.5)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(0, 0, 0, 0.3)';
+                }}
+                title="Minimize"
+              >
+                −
+              </button>
+            <button
+                onClick={handleClose}
+              style={{
+                  width: '20px',
+                  height: '20px',
+                  borderRadius: '4px',
+                  border: 'none',
+                  background: 'rgba(255, 59, 48, 0.8)',
+                  color: '#fff',
+                  fontSize: '14px',
+                  fontWeight: '300',
+                cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                transition: 'all 0.15s ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = '#ff3b30';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(255, 59, 48, 0.8)';
+                }}
+                title="Close"
+              >
+                ×
             </button>
+            </div>
+
+            {/* Settings Content with Top Padding */}
+            <div style={{ paddingTop: '40px' }}>
             <Settings />
+            </div>
           </>
         )}
       </main>
@@ -825,7 +1004,7 @@ function App() {
       {/* ROI Configuration Modal */}
       <RoiConfigModal
         isOpen={showRoiModal}
-        onClose={() => setShowRoiModal(false)}
+        onClose={handleCloseRoiModal}
         onSelectingChange={handleSelectingChange}
       />
 

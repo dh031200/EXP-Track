@@ -4,28 +4,30 @@ import { invoke } from '@tauri-apps/api/core';
  * EXP tracking statistics
  */
 export interface ExpStats {
+  /** Current level (nullable during initial tracking) */
+  level: number | null;
+  /** Current EXP value (nullable during initial tracking) */
+  exp: number | null;
+  /** Current percentage to next level (nullable during initial tracking) */
+  percentage: number | null;
+  /** Current HP potion count (nullable during initial tracking) */
+  hp_potion_count: number | null;
+  /** Current MP potion count (nullable during initial tracking) */
+  mp_potion_count: number | null;
   /** Total EXP gained during session */
   total_exp: number;
   /** Total percentage gained (including level ups) */
   total_percentage: number;
-  /** Total meso gained during session */
-  total_meso: number;
   /** Elapsed time in seconds */
   elapsed_seconds: number;
   /** EXP gained per hour */
   exp_per_hour: number;
   /** Percentage gained per hour */
   percentage_per_hour: number;
-  /** Meso gained per hour */
-  meso_per_hour: number;
-  /** EXP gained per minute */
-  exp_per_minute: number;
-  /** Current character level */
-  current_level: number;
-  /** Starting level of session */
-  start_level: number;
-  /** Number of levels gained */
-  levels_gained: number;
+  /** Is currently tracking */
+  is_tracking: boolean;
+  /** Error message if any */
+  error: string | null;
   /** Total HP potions used */
   hp_potions_used: number;
   /** Total MP potions used */
@@ -34,6 +36,8 @@ export interface ExpStats {
   hp_potions_per_minute: number;
   /** MP potions consumed per minute */
   mp_potions_per_minute: number;
+  /** OCR server health status */
+  ocr_server_healthy: boolean;
 }
 
 /**

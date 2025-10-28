@@ -14,12 +14,12 @@
     "windows": [
       {
         "title": "exp-tracker",
-        "width": 480,
-        "height": 300,
-        "minWidth": 480,
-        "minHeight": 300,
-        "maxWidth": 480,
-        "maxHeight": 300,
+        "width": 550,
+        "height": 120,
+        "minWidth": 500,
+        "minHeight": 100,
+        "maxWidth": 700,
+        "maxHeight": 150,
         "resizable": true,
         "transparent": true,
         "decorations": false,
@@ -32,7 +32,9 @@
         {
           "identifier": "main-capability",
           "description": "Capability for main window",
-          "windows": ["*"],
+          "windows": [
+            "*"
+          ],
           "permissions": [
             "core:default",
             "core:window:allow-set-size",
@@ -50,7 +52,12 @@
             "core:webview:allow-create-webview-window",
             "core:webview:allow-webview-position",
             "core:webview:allow-webview-size",
-            "core:webview:allow-internal-toggle-devtools"
+            "core:webview:allow-internal-toggle-devtools",
+            "global-shortcut:allow-is-registered",
+            "global-shortcut:allow-register",
+            "global-shortcut:allow-register-all",
+            "global-shortcut:allow-unregister",
+            "global-shortcut:allow-unregister-all"
           ]
         }
       ]
@@ -58,7 +65,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app"],
+    "targets": [
+      "app"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
