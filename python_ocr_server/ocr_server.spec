@@ -8,13 +8,13 @@ a = Analysis(
     pathex=[],
     binaries=[
         # ONNX Runtime native libraries - OS-specific
-        ('C:/dev/EXP-Track/.venv/Lib/site-packages/onnxruntime/capi/onnxruntime.dll', 'onnxruntime/capi'),
-        ('C:/dev/EXP-Track/.venv/Lib/site-packages/onnxruntime/capi/onnxruntime_providers_shared.dll', 'onnxruntime/capi'),
-        ('C:/dev/EXP-Track/.venv/Lib/site-packages/onnxruntime/capi/onnxruntime_pybind11_state.pyd', 'onnxruntime/capi')
+        ('D:/wjh1065/Projects/EXP-Track/.venv/Lib/site-packages/onnxruntime/capi/onnxruntime.dll', 'onnxruntime/capi'),
+        ('D:/wjh1065/Projects/EXP-Track/.venv/Lib/site-packages/onnxruntime/capi/onnxruntime_providers_shared.dll', 'onnxruntime/capi'),
+        ('D:/wjh1065/Projects/EXP-Track/.venv/Lib/site-packages/onnxruntime/capi/onnxruntime_pybind11_state.pyd', 'onnxruntime/capi')
     ],
     datas=[
         # Include entire RapidOCR package with all resources
-        ('C:/dev/EXP-Track/.venv/Lib/site-packages/rapidocr', 'rapidocr'),
+        ('D:/wjh1065/Projects/EXP-Track/.venv/Lib/site-packages/rapidocr', 'rapidocr'),
     ],
     hiddenimports=[
         # RapidOCR core
