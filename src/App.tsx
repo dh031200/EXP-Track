@@ -10,6 +10,7 @@ import { useRoiStore } from "./stores/roiStore";
 import { useTrackingStore } from "./stores/trackingStore";
 import { useSessionStore } from "./stores/sessionStore";
 import { useTimerSettingsStore } from "./stores/timerSettingsStore";
+import { useMesoStore } from "./stores/mesoStore";
 import { useParallelOcrTracker } from "./hooks/useParallelOcrTracker";
 import { initScreenCapture } from "./lib/tauri";
 import { checkOcrHealth } from "./lib/ocrCommands";
@@ -31,6 +32,9 @@ function App() {
   const [showRoiModal, setShowRoiModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showTimerSettings, setShowTimerSettings] = useState(false);
+  const [showMesoInputModal, setShowMesoInputModal] = useState(false);
+  const [mesoInputType, setMesoInputType] = useState<'start' | 'end'>('start');
+  const [mesoInputValue, setMesoInputValue] = useState('');
   
   // Timestamped EXP data for per-interval calculation and history
   const [expDataPoints, setExpDataPoints] = useState<Array<{
@@ -62,6 +66,19 @@ function App() {
   } = useSessionStore();
 
   const { selectedAverageInterval, averageCalculationMode } = useTimerSettingsStore();
+
+  const {
+    startMeso,
+    endMeso,
+    hpPotionPrice,
+    mpPotionPrice,
+    setStartMeso,
+    setEndMeso,
+    resetSession: resetMesoSession,
+    calculateMesoGained,
+    calculatePotionCost,
+    calculateNetProfit,
+  } = useMesoStore();
 
   // Parallel OCR Tracker hook
   const parallelOcrTracker = useParallelOcrTracker();
@@ -378,22 +395,24 @@ function App() {
 
   const handleOpenRoiModal = async () => {
     setShowRoiModal(true);
-    const window = getCurrentWindow();
-    try {
-      await window.setSize(new LogicalSize(550, 300));
-    } catch (error) {
-      console.error('Failed to resize window:', error);
-    }
+    // Don't force resize - let user keep their preferred size
   };
 
   const handleCloseRoiModal = async () => {
     setShowRoiModal(false);
-    const window = getCurrentWindow();
-    try {
-      await window.setSize(new LogicalSize(550, 120));
-    } catch (error) {
-      console.error('Failed to resize window:', error);
-    }
+    // Don't force resize - let user keep their preferred size
+  };
+
+  const handleOpenMesoInput = async (type: 'start' | 'end') => {
+    setMesoInputType(type);
+    setMesoInputValue('');
+    setShowMesoInputModal(true);
+    // Don't force resize - let user keep their preferred size
+  };
+
+  const handleCloseMesoInput = async () => {
+    setShowMesoInputModal(false);
+    // Don't force resize - let user keep their preferred size
   };
 
   const handleToggleTracking = async () => {
@@ -403,11 +422,8 @@ function App() {
     }
 
     if (trackingState === 'idle') {
-      // Start new session
-      startSession();
-      startTracking();
-      // Start OCR and exp recording
-      await parallelOcrTracker.start();
+      // Show meso input modal for start meso
+      await handleOpenMesoInput('start');
     } else if (trackingState === 'paused') {
       // Resume tracking
       startTracking();
@@ -421,14 +437,60 @@ function App() {
     }
   };
 
+  const handleStartMesoSubmit = async () => {
+    const meso = parseInt(mesoInputValue);
+    if (isNaN(meso) || meso < 0) {
+      alert('올바른 메소를 입력하세요.');
+      return;
+    }
+
+    setStartMeso(meso);
+    await handleCloseMesoInput();
+
+    // Start new session
+    startSession();
+    startTracking();
+    // Start OCR and exp recording
+    await parallelOcrTracker.start();
+  };
+
+  const handleSkipMesoInput = async () => {
+    await handleCloseMesoInput();
+    
+    if (mesoInputType === 'start') {
+      // Start tracking without meso input
+      startSession();
+      startTracking();
+      await parallelOcrTracker.start();
+    }
+  };
+
+  const handleEndMesoSubmit = async () => {
+    const meso = parseInt(mesoInputValue);
+    if (isNaN(meso) || meso < 0) {
+      alert('올바른 메소를 입력하세요.');
+      return;
+    }
+
+    setEndMeso(meso);
+    await handleCloseMesoInput();
+  };
+
   const handleReset = async () => {
     if (trackingState !== 'idle') {
+      // If tracking is active, ask for end meso
+      if (startMeso !== null && endMeso === null) {
+        await handleOpenMesoInput('end');
+        return;
+      }
       // Save session to history before resetting
       endSession();
     }
     resetTracking();
     // Clear exp data and reset to initial state
     await parallelOcrTracker.reset();
+    // Reset meso session
+    resetMesoSession();
   };
 
   const handleClose = async () => {
@@ -450,24 +512,12 @@ function App() {
   // Handle settings view - resize window
   const handleOpenSettings = async () => {
     setShowSettings(true);
-    const window = getCurrentWindow();
-    try {
-      await window.setSize(new LogicalSize(550, 480));
-      await window.setAlwaysOnTop(true);
-    } catch (error) {
-      console.error('Failed to resize window:', error);
-    }
+    // Don't force resize - let user keep their preferred size
   };
 
   const handleCloseSettings = async () => {
     setShowSettings(false);
-    const window = getCurrentWindow();
-    try {
-      await window.setSize(new LogicalSize(550, 120));
-      await window.setAlwaysOnTop(true);
-    } catch (error) {
-      console.error('Failed to resize window:', error);
-    }
+    // Don't force resize - let user keep their preferred size
   };
 
   const handleOpenHistory = async () => {
@@ -517,26 +567,26 @@ function App() {
     >
       {/* Main Container with Horizontal Layout */}
       <main 
-        onMouseDown={!isSelecting && !showSettings ? handleDragStart : undefined}
+        onMouseDown={!isSelecting && !showSettings && !showMesoInputModal ? handleDragStart : undefined}
           style={{
           background: isSelecting ? 'transparent' : 'rgba(255, 255, 255, 0.98)',
           height: '100%',
           borderRadius: isSelecting ? '0' : '10px',
-          overflow: showSettings ? 'auto' : 'hidden',
+          overflow: (showSettings || showMesoInputModal) ? 'auto' : 'hidden',
           boxSizing: 'border-box',
             display: 'flex',
-          flexDirection: showSettings ? 'column' : 'row',
-          alignItems: showSettings ? 'stretch' : 'center',
-          padding: isSelecting ? '0' : showSettings ? '0' : '8px 20px',
-          paddingTop: isSelecting ? '0' : showSettings ? '0' : '35px',
-          paddingBottom: isSelecting ? '0' : showSettings ? '0' : '10px',
+          flexDirection: (showSettings || showMesoInputModal) ? 'column' : 'row',
+          alignItems: (showSettings || showMesoInputModal) ? 'stretch' : 'center',
+          padding: isSelecting ? '0' : (showSettings || showMesoInputModal) ? '0' : '8px 20px',
+          paddingTop: isSelecting ? '0' : (showSettings || showMesoInputModal) ? '0' : '35px',
+          paddingBottom: isSelecting ? '0' : (showSettings || showMesoInputModal) ? '0' : '10px',
           gap: '4px',
           position: 'relative',
-          cursor: (!isSelecting && !showSettings) ? 'move' : 'default',
-          userSelect: showSettings ? 'auto' : 'none'
+          cursor: (!isSelecting && !showSettings && !showMesoInputModal) ? 'move' : 'default',
+          userSelect: (showSettings || showMesoInputModal) ? 'auto' : 'none'
         }}
       >
-        {!isSelecting && !showSettings && (
+        {!isSelecting && !showSettings && !showMesoInputModal && (
           <>
             {/* Window Controls - Top Right */}
           <div
@@ -814,10 +864,62 @@ function App() {
                 fontSize: '13px',
                 color: '#666',
                 borderTop: '1px solid rgba(0, 0, 0, 0.05)',
-                paddingTop: '4px'
+                paddingTop: '4px',
+                paddingBottom: '4px'
               }}>
                 현재: Lv.{parallelOcrTracker.stats?.level || '?'} ({parallelOcrTracker.stats?.percentage?.toFixed(2) || '0.00'}%) | 시간당: {parallelOcrTracker.stats?.exp_per_hour?.toLocaleString('ko-KR') || '0'}
               </div>
+              {/* 메소 정보 */}
+              {(startMeso !== null || endMeso !== null) && (
+                <div style={{
+                  fontSize: '11px',
+                  borderTop: '1px solid rgba(0, 0, 0, 0.05)',
+                  paddingTop: '4px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '3px'
+                }}>
+                  <div style={{ fontWeight: '600', color: '#666', fontSize: '12px' }}>
+                    💰 메소 수익
+                  </div>
+                  {startMeso !== null && endMeso !== null ? (
+                    <div style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: '8px',
+                      flexWrap: 'wrap'
+                    }}>
+                      <span style={{ color: '#2196F3', fontWeight: '600' }}>
+                        몹: {calculateMesoGained().toLocaleString('ko-KR')}
+                      </span>
+                      <span style={{ color: '#ddd' }}>|</span>
+                      <span style={{ color: '#FF9800', fontWeight: '600' }}>
+                        포션: -{calculatePotionCost(
+                          parallelOcrTracker.stats?.hp_potions_used || 0,
+                          parallelOcrTracker.stats?.mp_potions_used || 0
+                        ).toLocaleString('ko-KR')}
+                      </span>
+                      <span style={{ color: '#ddd' }}>|</span>
+                      <span style={{ 
+                        fontWeight: '700',
+                        color: calculateNetProfit(
+                          parallelOcrTracker.stats?.hp_potions_used || 0,
+                          parallelOcrTracker.stats?.mp_potions_used || 0
+                        ) >= 0 ? '#4CAF50' : '#f44336'
+                      }}>
+                        순이익: {calculateNetProfit(
+                          parallelOcrTracker.stats?.hp_potions_used || 0,
+                          parallelOcrTracker.stats?.mp_potions_used || 0
+                        ).toLocaleString('ko-KR')}
+                      </span>
+                    </div>
+                  ) : startMeso !== null ? (
+                    <div style={{ color: '#999', fontWeight: '600' }}>
+                      시작: {startMeso.toLocaleString('ko-KR')} 메소
+                    </div>
+                  ) : null}
+                </div>
+              )}
             </div>
 
             {/* Section 3: 포션 */}
@@ -996,6 +1098,233 @@ function App() {
             {/* Settings Content with Top Padding */}
             <div style={{ paddingTop: '40px' }}>
             <Settings />
+            </div>
+          </>
+        )}
+
+        {!isSelecting && showMesoInputModal && (
+          <>
+            {/* Draggable Title Bar for Meso Input */}
+            <div
+              onMouseDown={handleDragStart}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                height: '40px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'move',
+                zIndex: 999,
+                userSelect: 'none'
+              }}
+            >
+              <span style={{
+                fontSize: '12px',
+                fontWeight: '600',
+                color: '#999'
+              }}>
+                {mesoInputType === 'start' ? '시작 메소 입력' : '종료 메소 입력'}
+              </span>
+            </div>
+
+            {/* Back Button */}
+            <button
+              onClick={handleCloseMesoInput}
+              onMouseDown={(e) => e.stopPropagation()}
+              style={{
+                position: 'absolute',
+                top: '8px',
+                left: '8px',
+                padding: '6px 12px',
+                fontSize: '13px',
+                background: 'rgba(255, 255, 255, 0.95)',
+                color: '#333',
+                border: '1px solid rgba(0, 0, 0, 0.2)',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+                fontWeight: '600',
+                zIndex: 1000,
+                boxShadow: '0 2px 6px rgba(0, 0, 0, 0.1)'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(240, 240, 240, 1)';
+                e.currentTarget.style.transform = 'scale(1.05)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.95)';
+                e.currentTarget.style.transform = 'scale(1)';
+              }}
+            >
+              ← 뒤로
+            </button>
+
+            {/* Window Controls */}
+            <div
+              onMouseDown={(e) => e.stopPropagation()}
+              style={{
+                position: 'absolute',
+                top: '6px',
+                right: '8px',
+                display: 'flex',
+                gap: '4px',
+                zIndex: 1000
+              }}
+            >
+              <button
+                onClick={handleMinimize}
+                style={{
+                  width: '20px',
+                  height: '20px',
+                  borderRadius: '4px',
+                  border: 'none',
+                  background: 'rgba(0, 0, 0, 0.3)',
+                  color: '#fff',
+                  fontSize: '14px',
+                  fontWeight: '300',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'all 0.15s ease',
+                  paddingBottom: '2px',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(0, 0, 0, 0.5)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(0, 0, 0, 0.3)';
+                }}
+                title="Minimize"
+              >
+                −
+              </button>
+              <button
+                onClick={handleClose}
+                style={{
+                  width: '20px',
+                  height: '20px',
+                  borderRadius: '4px',
+                  border: 'none',
+                  background: 'rgba(255, 59, 48, 0.8)',
+                  color: '#fff',
+                  fontSize: '14px',
+                  fontWeight: '300',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'all 0.15s ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = '#ff3b30';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(255, 59, 48, 0.8)';
+                }}
+                title="Close"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Meso Input Content with Top Padding */}
+            <div style={{ paddingTop: '50px', padding: '50px 30px 30px 30px' }}>
+              <p style={{ margin: '0 0 20px 0', fontSize: '14px', color: '#666', lineHeight: '1.5' }}>
+                {mesoInputType === 'start' 
+                  ? '사냥을 시작하기 전 현재 보유 중인 총 메소를 입력하세요.'
+                  : '사냥이 끝난 후 현재 보유 중인 총 메소를 입력하세요.'}
+              </p>
+              <input
+                type="text"
+                value={mesoInputValue ? parseInt(mesoInputValue.replace(/,/g, '')).toLocaleString('ko-KR') : ''}
+                onChange={(e) => {
+                  const value = e.target.value.replace(/,/g, '');
+                  if (value === '' || /^\d+$/.test(value)) {
+                    setMesoInputValue(value);
+                  }
+                }}
+                placeholder="메소를 입력하세요"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    if (mesoInputType === 'start') {
+                      handleStartMesoSubmit();
+                    } else {
+                      handleEndMesoSubmit();
+                    }
+                  }
+                }}
+                style={{
+                  width: '100%',
+                  padding: '14px',
+                  fontSize: '16px',
+                  border: '2px solid #e0e0e0',
+                  borderRadius: '8px',
+                  marginBottom: '20px',
+                  boxSizing: 'border-box',
+                  outline: 'none',
+                  transition: 'border-color 0.15s ease',
+                }}
+                onFocus={(e) => {
+                  e.currentTarget.style.borderColor = '#4CAF50';
+                }}
+                onBlur={(e) => {
+                  e.currentTarget.style.borderColor = '#e0e0e0';
+                }}
+              />
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'space-between' }}>
+                <button
+                  onClick={handleSkipMesoInput}
+                  style={{
+                    padding: '12px 24px',
+                    fontSize: '14px',
+                    fontWeight: '600',
+                    background: '#f5f5f5',
+                    color: '#999',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = '#e0e0e0';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = '#f5f5f5';
+                  }}
+                >
+                  건너뛰기
+                </button>
+                <button
+                  onClick={mesoInputType === 'start' ? handleStartMesoSubmit : handleEndMesoSubmit}
+                  style={{
+                    padding: '12px 24px',
+                    fontSize: '14px',
+                    fontWeight: '600',
+                    background: 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    boxShadow: '0 2px 6px rgba(0, 0, 0, 0.15)',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = 'translateY(-1px)';
+                    e.currentTarget.style.boxShadow = '0 4px 8px rgba(0, 0, 0, 0.2)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = 'translateY(0)';
+                    e.currentTarget.style.boxShadow = '0 2px 6px rgba(0, 0, 0, 0.15)';
+                  }}
+                >
+                  확인
+                </button>
+              </div>
             </div>
           </>
         )}

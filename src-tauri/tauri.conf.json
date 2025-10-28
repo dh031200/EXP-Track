@@ -15,11 +15,11 @@
       {
         "title": "exp-tracker",
         "width": 550,
-        "height": 120,
+        "height": 225,
         "minWidth": 500,
         "minHeight": 100,
         "maxWidth": 700,
-        "maxHeight": 150,
+        "maxHeight": 600,
         "resizable": true,
         "transparent": true,
         "decorations": false,
