@@ -14,9 +14,9 @@
     "windows": [
       {
         "title": "exp-tracker",
-        "width": 425,
+        "width": 510,
         "height": 140,
-        "minWidth": 425,
+        "minWidth": 510,
         "minHeight": 140,
         "maxWidth": 800,
         "maxHeight": 200,

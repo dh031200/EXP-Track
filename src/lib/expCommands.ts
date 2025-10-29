@@ -119,3 +119,19 @@ export function formatPercentage(pct: number): string {
   const intPart = parts[0].padStart(2, '0');
   return `${intPart}.${parts[1]}%`;
 }
+
+/**
+ * Format number with K/M suffix for compact display
+ * e.g., 500 -> "500", 1500 -> "1.5K", 1500000 -> "1.5M"
+ */
+export function formatCompact(num: number): string {
+  if (num < 1000) {
+    return num.toString();
+  } else if (num < 1000000) {
+    const k = num / 1000;
+    return k % 1 === 0 ? `${k}K` : `${k.toFixed(1)}K`;
+  } else {
+    const m = num / 1000000;
+    return m % 1 === 0 ? `${m}M` : `${m.toFixed(1)}M`;
+  }
+}

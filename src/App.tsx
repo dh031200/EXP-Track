@@ -14,6 +14,7 @@ import { useMesoStore } from "./stores/mesoStore";
 import { useParallelOcrTracker } from "./hooks/useParallelOcrTracker";
 import { initScreenCapture } from "./lib/tauri";
 import { checkOcrHealth } from "./lib/ocrCommands";
+import { formatCompact } from "./lib/expCommands";
 import "./App.css";
 
 // Import icons
@@ -257,7 +258,7 @@ function App() {
         // Not enough data yet, show current rate
         const expPerSecond = stats.total_exp / stats.elapsed_seconds;
         const avgExp = Math.floor(expPerSecond * intervalSeconds);
-        return { label: `${intervalLabel} (예상)`, value: avgExp.toLocaleString('ko-KR') };
+        return { label: `${intervalLabel} (예상)`, value: formatCompact(avgExp) };
       }
       
       // Use data from prediction window to predict full interval
@@ -276,14 +277,14 @@ function App() {
         if (timeElapsed > 0) {
           const expPerSecond = expGained / timeElapsed;
           const avgExp = Math.floor(expPerSecond * intervalSeconds);
-          return { label: `${intervalLabel} (예상)`, value: avgExp.toLocaleString('ko-KR') };
+          return { label: `${intervalLabel} (예상)`, value: formatCompact(avgExp) };
         }
       }
       
       // Fallback to current rate if not enough data points
       const expPerSecond = stats.total_exp / stats.elapsed_seconds;
       const avgExp = Math.floor(expPerSecond * intervalSeconds);
-      return { label: `${intervalLabel} (예상)`, value: avgExp.toLocaleString('ko-KR') };
+      return { label: `${intervalLabel} (예상)`, value: formatCompact(avgExp) };
     }
 
     // Per-interval mode: Actual EXP gained in recent N minutes
@@ -299,14 +300,14 @@ function App() {
       const lastPoint = relevantPoints[relevantPoints.length - 1];
       const expGained = lastPoint.totalExp - firstPoint.totalExp;
       
-      return { label: intervalLabel, value: expGained.toLocaleString('ko-KR') };
+      return { label: intervalLabel, value: formatCompact(expGained) };
     }
     
     // Not enough data points, use current average
     const cappedSeconds = Math.min(stats.elapsed_seconds, intervalSeconds);
     const expPerSecond = stats.total_exp / stats.elapsed_seconds;
     const avgExp = Math.floor(expPerSecond * cappedSeconds);
-    return { label: intervalLabel, value: avgExp.toLocaleString('ko-KR') };
+    return { label: intervalLabel, value: formatCompact(avgExp) };
   };
 
   const averageData = calculateAverage();
@@ -373,10 +374,14 @@ function App() {
     const minutes = Math.floor((hoursNeeded - hours) * 60);
     
     if (hours > 999) {
-      return '999h+';
+      return '999시간+';
     }
     
-    return `${hours}h ${minutes}m`;
+    if (hours === 0) {
+      return `${minutes}분`;
+    }
+    
+    return `${hours}시간 ${minutes}분`;
   };
 
   const levelUpETA = calculateLevelUpETA();
@@ -406,7 +411,7 @@ function App() {
     setShowRoiModal(false);
     
     const window = getCurrentWindow();
-    await window.setSize(new LogicalSize(525, 140));
+    await window.setSize(new LogicalSize(510, 140));
   };
 
   const handleOpenMesoModal = async () => {
@@ -418,7 +423,7 @@ function App() {
     setShowMesoModal(true);
     
     const window = getCurrentWindow();
-    await window.setSize(new LogicalSize(560, 520));
+    await window.setSize(new LogicalSize(560, 600));
   };
 
   const handleCloseMesoModal = async () => {
@@ -426,7 +431,7 @@ function App() {
     setPreviewMeso(null);
     
     const window = getCurrentWindow();
-    await window.setSize(new LogicalSize(525, 140));
+    await window.setSize(new LogicalSize(510, 140));
   };
 
   const handleMesoCalculate = () => {
@@ -557,7 +562,7 @@ function App() {
     setShowSettings(false);
     
     const window = getCurrentWindow();
-    await window.setSize(new LogicalSize(525, 140));
+    await window.setSize(new LogicalSize(510, 140));
   };
 
   const handleOpenHistory = async () => {
@@ -623,17 +628,24 @@ function App() {
             onMouseDown={(e) => e.stopPropagation()}
             style={{
               position: 'absolute',
-              top: '8px',
+              top: '3px',
               left: '12px',
               display: 'flex',
               alignItems: 'center',
               gap: '4px',
               zIndex: 1000,
               cursor: 'default',
+              padding: '1px 4px',
+              background: 'rgba(0, 0, 0, 0.03)',
+              borderRadius: '4px',
             }}
+            title={ocrHealthy ? 'OCR 서버 연결됨' : 'OCR 서버 연결 끊김'}
           >
-            <span style={{ fontSize: '12px' }} title={ocrHealthy ? 'OCR 연결됨' : 'OCR 연결 끊김'}>
+            <span style={{ fontSize: '6px' }}>
               {ocrHealthy ? '🟢' : '🔴'}
+            </span>
+            <span style={{ fontSize: '9px', color: '#999', fontWeight: '600' }}>
+              OCR
             </span>
           </div>
         )}
@@ -927,7 +939,7 @@ function App() {
                         레벨업까지
                       </div>
                       <div style={{
-                        fontSize: '18px',
+                        fontSize: '16px',
                         fontWeight: '700',
                         color: '#d32f2f'
                       }}>
@@ -955,7 +967,7 @@ function App() {
                     fontSize: '11px',
                     color: '#666',
                   }}>
-                    현재: Lv.{parallelOcrTracker.stats?.level || '?'} ({parallelOcrTracker.stats?.percentage?.toFixed(2) || '0.00'}%) | 시간당: {parallelOcrTracker.stats?.exp_per_hour?.toLocaleString('ko-KR') || '0'}
+                    현재: Lv.{parallelOcrTracker.stats?.level || '?'} ({parallelOcrTracker.stats?.percentage?.toFixed(2) || '0.00'}%) | 시간당: {formatCompact(parallelOcrTracker.stats?.exp_per_hour || 0)}
                   </div>
                 </div>
 
