@@ -423,7 +423,8 @@ function App() {
     setShowMesoModal(true);
     
     const window = getCurrentWindow();
-    await window.setSize(new LogicalSize(560, 600));
+    await window.setResizable(false);
+    await window.setSize(new LogicalSize(560, 630));
   };
 
   const handleCloseMesoModal = async () => {
@@ -431,6 +432,7 @@ function App() {
     setPreviewMeso(null);
     
     const window = getCurrentWindow();
+    await window.setResizable(true);
     await window.setSize(new LogicalSize(510, 140));
   };
 
@@ -555,7 +557,7 @@ function App() {
     setShowSettings(true);
     
     const window = getCurrentWindow();
-    await window.setSize(new LogicalSize(480, 420));
+    await window.setSize(new LogicalSize(480, 500));
   };
 
   const handleCloseSettings = async () => {
@@ -850,26 +852,6 @@ function App() {
                   >
                       <img src={settingIcon} alt="Settings" style={{ width: '14px', height: '14px' }} />
                   </button>
-                  <button
-                      onClick={handleOpenMesoModal}
-                    style={{
-                        width: '24px',
-                        height: '24px',
-                        background: 'rgba(255, 193, 7, 0.1)',
-                        border: '1px solid rgba(255, 193, 7, 0.3)',
-                      borderRadius: '6px',
-                        cursor: 'pointer',
-                      transition: 'all 0.15s ease',
-                      padding: 0,
-                      display: 'flex',
-                      alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: '14px'
-                    }}
-                      title="메소 관리"
-                  >
-                      💰
-                  </button>
                   </div>
 
                   {/* Timer */}
@@ -982,12 +964,39 @@ function App() {
                   cursor: 'default',
                 }}>
                   <div style={{ 
-                    fontWeight: 600, 
-                    color: '#666', 
-                    fontSize: '14px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
                     marginBottom: '2px'
                   }}>
-                    포션 사용
+                    <span style={{
+                      fontWeight: 600, 
+                      color: '#666', 
+                      fontSize: '14px',
+                    }}>
+                      포션 사용
+                    </span>
+                    <button
+                      onClick={handleOpenMesoModal}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      style={{
+                        width: '24px',
+                        height: '24px',
+                        background: 'rgba(255, 193, 7, 0.1)',
+                        border: '1px solid rgba(255, 193, 7, 0.3)',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                        padding: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '14px'
+                      }}
+                      title="메소 관리"
+                    >
+                      💰
+                    </button>
                   </div>
                   <div style={{
                     display: 'flex',
