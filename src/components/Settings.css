@@ -2,9 +2,8 @@
   padding: 16px 20px;
   max-width: 600px;
   margin: 0 auto;
-  height: 100%;
   box-sizing: border-box;
-  overflow: hidden;
+  overflow: visible;
   display: flex;
   flex-direction: column;
 }
@@ -23,6 +22,10 @@
   background: transparent;
   border-radius: 12px;
   border: none;
+}
+
+.settings-section:first-child {
+  padding-top: 0px;
 }
 
 .settings-section h3 {

@@ -16,14 +16,12 @@ export function Settings() {
 
   return (
     <div className="settings-container">
-      <h2>설정</h2>
-
       <div className="settings-section">
-        <h3>외형</h3>
+        <h3>배경</h3>
 
         <div className="settings-item">
           <label htmlFor="opacity-slider" className="settings-label">
-            배경 투명도: <strong>{opacityPercent}%</strong>
+            투명도: <strong>{opacityPercent}%</strong>
           </label>
           <div className="slider-container">
             <span className="slider-label">30%</span>
@@ -50,7 +48,7 @@ export function Settings() {
 
         <div className="settings-item">
           <label htmlFor="duration-select" className="settings-label">
-            목표 시간 설정
+            시간 설정
           </label>
           <select
             id="duration-select"

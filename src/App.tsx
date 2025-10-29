@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { listen } from '@tauri-apps/api/event';
-import { RoiConfigModal } from "./components/RoiConfigModal";
+import { CompactRoiManager } from "./components/CompactRoiManager";
 import { Settings } from "./components/Settings";
 import { TimerSettingsModal } from "./components/TimerSettingsModal";
 import { useSettingsStore } from "./stores/settingsStore";
@@ -10,9 +10,11 @@ import { useRoiStore } from "./stores/roiStore";
 import { useTrackingStore } from "./stores/trackingStore";
 import { useSessionStore } from "./stores/sessionStore";
 import { useTimerSettingsStore } from "./stores/timerSettingsStore";
+import { useMesoStore } from "./stores/mesoStore";
 import { useParallelOcrTracker } from "./hooks/useParallelOcrTracker";
 import { initScreenCapture } from "./lib/tauri";
 import { checkOcrHealth } from "./lib/ocrCommands";
+import { formatCompact } from "./lib/expCommands";
 import "./App.css";
 
 // Import icons
@@ -31,6 +33,12 @@ function App() {
   const [showRoiModal, setShowRoiModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showTimerSettings, setShowTimerSettings] = useState(false);
+  const [showMesoModal, setShowMesoModal] = useState(false);
+  const [mesoInputStart, setMesoInputStart] = useState('');
+  const [mesoInputEnd, setMesoInputEnd] = useState('');
+  const [potionPriceInputHp, setPotionPriceInputHp] = useState('');
+  const [potionPriceInputMp, setPotionPriceInputMp] = useState('');
+  const [previewMeso, setPreviewMeso] = useState<{start: number | null, end: number | null, hpPrice: number, mpPrice: number} | null>(null);
   
   // Timestamped EXP data for per-interval calculation and history
   const [expDataPoints, setExpDataPoints] = useState<Array<{
@@ -62,6 +70,21 @@ function App() {
   } = useSessionStore();
 
   const { selectedAverageInterval, averageCalculationMode } = useTimerSettingsStore();
+
+  const {
+    startMeso,
+    endMeso,
+    hpPotionPrice,
+    mpPotionPrice,
+    setStartMeso,
+    setEndMeso,
+    setHpPotionPrice,
+    setMpPotionPrice,
+    resetSession: resetMesoSession,
+    calculateMesoGained,
+    calculatePotionCost,
+    calculateNetProfit,
+  } = useMesoStore();
 
   // Parallel OCR Tracker hook
   const parallelOcrTracker = useParallelOcrTracker();
@@ -235,7 +258,7 @@ function App() {
         // Not enough data yet, show current rate
         const expPerSecond = stats.total_exp / stats.elapsed_seconds;
         const avgExp = Math.floor(expPerSecond * intervalSeconds);
-        return { label: `${intervalLabel} (예상)`, value: avgExp.toLocaleString('ko-KR') };
+        return { label: `${intervalLabel} (예상)`, value: formatCompact(avgExp) };
       }
       
       // Use data from prediction window to predict full interval
@@ -254,14 +277,14 @@ function App() {
         if (timeElapsed > 0) {
           const expPerSecond = expGained / timeElapsed;
           const avgExp = Math.floor(expPerSecond * intervalSeconds);
-          return { label: `${intervalLabel} (예상)`, value: avgExp.toLocaleString('ko-KR') };
+          return { label: `${intervalLabel} (예상)`, value: formatCompact(avgExp) };
         }
       }
       
       // Fallback to current rate if not enough data points
       const expPerSecond = stats.total_exp / stats.elapsed_seconds;
       const avgExp = Math.floor(expPerSecond * intervalSeconds);
-      return { label: `${intervalLabel} (예상)`, value: avgExp.toLocaleString('ko-KR') };
+      return { label: `${intervalLabel} (예상)`, value: formatCompact(avgExp) };
     }
 
     // Per-interval mode: Actual EXP gained in recent N minutes
@@ -277,14 +300,14 @@ function App() {
       const lastPoint = relevantPoints[relevantPoints.length - 1];
       const expGained = lastPoint.totalExp - firstPoint.totalExp;
       
-      return { label: intervalLabel, value: expGained.toLocaleString('ko-KR') };
+      return { label: intervalLabel, value: formatCompact(expGained) };
     }
     
     // Not enough data points, use current average
     const cappedSeconds = Math.min(stats.elapsed_seconds, intervalSeconds);
     const expPerSecond = stats.total_exp / stats.elapsed_seconds;
     const avgExp = Math.floor(expPerSecond * cappedSeconds);
-    return { label: intervalLabel, value: avgExp.toLocaleString('ko-KR') };
+    return { label: intervalLabel, value: formatCompact(avgExp) };
   };
 
   const averageData = calculateAverage();
@@ -322,25 +345,22 @@ function App() {
     };
 
     const currentLevel = stats.level;
-    const currentPercentage = stats.percentage || 0;
+    const currentExp = stats.exp || 0;
     
     // Validate level range
     if (currentLevel < 1 || currentLevel >= 200) {
       return '−';
     }
     
-    // Get exp for current and next level
-    const currentLevelExp = expTable[currentLevel];
-    const nextLevelExp = expTable[currentLevel + 1];
+    // Get required exp for next level
+    const requiredExp = expTable[currentLevel];
     
-    if (!currentLevelExp || !nextLevelExp) {
+    if (!requiredExp) {
       return '−';
     }
     
     // Calculate remaining exp to next level
-    const expForLevel = nextLevelExp - currentLevelExp;
-    const currentExpInLevel = Math.floor(expForLevel * currentPercentage / 100);
-    const remainingExp = expForLevel - currentExpInLevel;
+    const remainingExp = requiredExp - currentExp;
     
     // Calculate hours needed
     const hoursNeeded = remainingExp / stats.exp_per_hour;
@@ -354,10 +374,14 @@ function App() {
     const minutes = Math.floor((hoursNeeded - hours) * 60);
     
     if (hours > 999) {
-      return '999h+';
+      return '999시간+';
     }
     
-    return `${hours}h ${minutes}m`;
+    if (hours === 0) {
+      return `${minutes}분`;
+    }
+    
+    return `${hours}시간 ${minutes}분`;
   };
 
   const levelUpETA = calculateLevelUpETA();
@@ -378,22 +402,113 @@ function App() {
 
   const handleOpenRoiModal = async () => {
     setShowRoiModal(true);
+    
     const window = getCurrentWindow();
-    try {
-      await window.setSize(new LogicalSize(550, 300));
-    } catch (error) {
-      console.error('Failed to resize window:', error);
-    }
+    await window.setResizable(false);
+    await window.setSize(new LogicalSize(520, 360));
   };
 
   const handleCloseRoiModal = async () => {
     setShowRoiModal(false);
+    
     const window = getCurrentWindow();
-    try {
-      await window.setSize(new LogicalSize(550, 120));
-    } catch (error) {
-      console.error('Failed to resize window:', error);
+    await window.setResizable(true);
+    await window.setSize(new LogicalSize(510, 140));
+  };
+
+  const handleOpenMesoModal = async () => {
+    setMesoInputStart(startMeso !== null ? startMeso.toString() : '');
+    setMesoInputEnd(endMeso !== null ? endMeso.toString() : '');
+    setPotionPriceInputHp(hpPotionPrice === 0 ? '' : hpPotionPrice.toString());
+    setPotionPriceInputMp(mpPotionPrice === 0 ? '' : mpPotionPrice.toString());
+    setPreviewMeso(null);
+    setShowMesoModal(true);
+    
+    const window = getCurrentWindow();
+    await window.setResizable(false);
+    await window.setSize(new LogicalSize(560, 630));
+  };
+
+  const handleCloseMesoModal = async () => {
+    setShowMesoModal(false);
+    setPreviewMeso(null);
+    
+    const window = getCurrentWindow();
+    await window.setResizable(true);
+    await window.setSize(new LogicalSize(510, 140));
+  };
+
+  const handleMesoCalculate = () => {
+    let startValue: number | null = null;
+    let endValue: number | null = null;
+    let hpPrice = 0;
+    let mpPrice = 0;
+
+    if (mesoInputStart.trim() !== '') {
+      const parsed = parseInt(mesoInputStart.replace(/,/g, ''));
+      if (!isNaN(parsed) && parsed >= 0) {
+        startValue = parsed;
+      }
     }
+
+    if (mesoInputEnd.trim() !== '') {
+      const parsed = parseInt(mesoInputEnd.replace(/,/g, ''));
+      if (!isNaN(parsed) && parsed >= 0) {
+        endValue = parsed;
+      }
+    }
+
+    if (potionPriceInputHp.trim() !== '') {
+      const parsed = parseInt(potionPriceInputHp.replace(/,/g, ''));
+      if (!isNaN(parsed) && parsed >= 0) {
+        hpPrice = parsed;
+      }
+    }
+    
+    if (potionPriceInputMp.trim() !== '') {
+      const parsed = parseInt(potionPriceInputMp.replace(/,/g, ''));
+      if (!isNaN(parsed) && parsed >= 0) {
+        mpPrice = parsed;
+      }
+    }
+
+    setPreviewMeso({ start: startValue, end: endValue, hpPrice, mpPrice });
+  };
+
+  const handleMesoSubmit = async () => {
+    if (mesoInputStart.trim() !== '') {
+      const startValue = parseInt(mesoInputStart.replace(/,/g, ''));
+      if (!isNaN(startValue) && startValue >= 0) {
+        setStartMeso(startValue);
+      }
+    } else {
+      setStartMeso(null);
+    }
+
+    if (mesoInputEnd.trim() !== '') {
+      const endValue = parseInt(mesoInputEnd.replace(/,/g, ''));
+      if (!isNaN(endValue) && endValue >= 0) {
+        setEndMeso(endValue);
+      }
+    } else {
+      setEndMeso(null);
+    }
+
+    if (potionPriceInputHp.trim() !== '') {
+      const hpPrice = parseInt(potionPriceInputHp.replace(/,/g, ''));
+      if (!isNaN(hpPrice) && hpPrice >= 0) {
+        setHpPotionPrice(hpPrice);
+      }
+    }
+    
+    if (potionPriceInputMp.trim() !== '') {
+      const mpPrice = parseInt(potionPriceInputMp.replace(/,/g, ''));
+      if (!isNaN(mpPrice) && mpPrice >= 0) {
+        setMpPotionPrice(mpPrice);
+      }
+    }
+
+    await handleCloseMesoModal();
   };
 
   const handleToggleTracking = async () => {
@@ -403,32 +518,25 @@ function App() {
     }
 
     if (trackingState === 'idle') {
-      // Start new session
       startSession();
       startTracking();
-      // Start OCR and exp recording
       await parallelOcrTracker.start();
     } else if (trackingState === 'paused') {
-      // Resume tracking
       startTracking();
-      // Resume OCR and exp recording
       await parallelOcrTracker.start();
     } else if (trackingState === 'tracking') {
-      // Pause tracking
       pauseTracking();
-      // Pause OCR and exp recording
       parallelOcrTracker.stop();
     }
   };
 
   const handleReset = async () => {
     if (trackingState !== 'idle') {
-      // Save session to history before resetting
       endSession();
     }
     resetTracking();
-    // Clear exp data and reset to initial state
     await parallelOcrTracker.reset();
+    resetMesoSession();
   };
 
   const handleClose = async () => {
@@ -447,27 +555,18 @@ function App() {
     await window.startDragging();
   };
 
-  // Handle settings view - resize window
   const handleOpenSettings = async () => {
     setShowSettings(true);
+    
     const window = getCurrentWindow();
-    try {
-      await window.setSize(new LogicalSize(550, 480));
-      await window.setAlwaysOnTop(true);
-    } catch (error) {
-      console.error('Failed to resize window:', error);
-    }
+    await window.setSize(new LogicalSize(480, 500));
   };
 
   const handleCloseSettings = async () => {
     setShowSettings(false);
+    
     const window = getCurrentWindow();
-    try {
-      await window.setSize(new LogicalSize(550, 120));
-      await window.setAlwaysOnTop(true);
-    } catch (error) {
-      console.error('Failed to resize window:', error);
-    }
+    await window.setSize(new LogicalSize(510, 140));
   };
 
   const handleOpenHistory = async () => {
@@ -512,68 +611,84 @@ function App() {
         display: 'flex',
         flexDirection: 'column',
         opacity: isSelecting ? 1 : backgroundOpacity,
-        position: 'relative'
       }}
     >
-      {/* Main Container with Horizontal Layout */}
-      <main 
-        onMouseDown={!isSelecting && !showSettings ? handleDragStart : undefined}
-          style={{
-          background: isSelecting ? 'transparent' : 'rgba(255, 255, 255, 0.98)',
+      <div
+        style={{
+          width: '100%',
           height: '100%',
-          borderRadius: isSelecting ? '0' : '10px',
-          overflow: showSettings ? 'auto' : 'hidden',
-          boxSizing: 'border-box',
-            display: 'flex',
-          flexDirection: showSettings ? 'column' : 'row',
-          alignItems: showSettings ? 'stretch' : 'center',
-          padding: isSelecting ? '0' : showSettings ? '0' : '8px 20px',
-          paddingTop: isSelecting ? '0' : showSettings ? '0' : '35px',
-          paddingBottom: isSelecting ? '0' : showSettings ? '0' : '10px',
-          gap: '4px',
+          background: isSelecting ? 'transparent' : 'rgba(255, 255, 255, 0.98)',
+          borderRadius: 'inherit',
+          display: 'flex',
+          flexDirection: 'column',
           position: 'relative',
-          cursor: (!isSelecting && !showSettings) ? 'move' : 'default',
-          userSelect: showSettings ? 'auto' : 'none'
+          cursor: (!isSelecting && !showSettings && !showMesoModal && !showRoiModal) ? 'move' : 'default',
+          pointerEvents: isSelecting ? 'none' : 'auto',
         }}
+        onMouseDown={!isSelecting && !showSettings && !showMesoModal && !showRoiModal ? handleDragStart : undefined}
       >
-        {!isSelecting && !showSettings && (
-          <>
-            {/* Window Controls - Top Right */}
+        {/* OCR Status - Left side of title bar */}
+        {!isSelecting && !showSettings && !showMesoModal && !showRoiModal && (
           <div
             onMouseDown={(e) => e.stopPropagation()}
             style={{
               position: 'absolute',
-              top: '8px',
-                right: '8px',
+              top: '3px',
+              left: '12px',
               display: 'flex',
-                gap: '4px',
-                zIndex: 100
+              alignItems: 'center',
+              gap: '4px',
+              zIndex: 1000,
+              cursor: 'default',
+              padding: '1px 4px',
+              background: 'rgba(0, 0, 0, 0.03)',
+              borderRadius: '4px',
+            }}
+            title={ocrHealthy ? 'OCR 서버 연결됨' : 'OCR 서버 연결 끊김'}
+          >
+            <span style={{ fontSize: '6px' }}>
+              {ocrHealthy ? '🟢' : '🔴'}
+            </span>
+            <span style={{ fontSize: '9px', color: '#999', fontWeight: '600' }}>
+              OCR
+            </span>
+          </div>
+        )}
+
+        {/* Window Controls are now positioned relative to this container */}
+        {!isSelecting && !showSettings && !showMesoModal && !showRoiModal && (
+          <div
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{
+              position: 'absolute',
+              top: '4px',
+              right: '8px',
+              display: 'flex',
+              gap: '4px',
+              zIndex: 1000,
+              cursor: 'default',
             }}
           >
             <button
               onClick={handleMinimize}
               style={{
-                  width: '20px',
-                  height: '20px',
-                  borderRadius: '4px',
+                width: '20px',
+                height: '20px',
+                borderRadius: '4px',
                 border: 'none',
-                  background: 'rgba(0, 0, 0, 0.3)',
+                background: 'rgba(0, 0, 0, 0.3)',
                 color: '#fff',
-                  fontSize: '14px',
+                fontSize: '14px',
                 fontWeight: '300',
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 transition: 'all 0.15s ease',
-                  paddingBottom: '2px',
+                paddingBottom: '2px',
               }}
-              onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'rgba(0, 0, 0, 0.5)';
-              }}
-              onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'rgba(0, 0, 0, 0.3)';
-              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0, 0, 0, 0.5)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(0, 0, 0, 0.3)'; }}
               title="Minimize"
             >
               −
@@ -581,13 +696,13 @@ function App() {
             <button
               onClick={handleClose}
               style={{
-                  width: '20px',
-                  height: '20px',
-                  borderRadius: '4px',
+                width: '20px',
+                height: '20px',
+                borderRadius: '4px',
                 border: 'none',
                 background: 'rgba(255, 59, 48, 0.8)',
                 color: '#fff',
-                  fontSize: '14px',
+                fontSize: '14px',
                 fontWeight: '300',
                 cursor: 'pointer',
                 display: 'flex',
@@ -595,424 +710,846 @@ function App() {
                 justifyContent: 'center',
                 transition: 'all 0.15s ease',
               }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = '#ff3b30';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'rgba(255, 59, 48, 0.8)';
-              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = '#ff3b30'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255, 59, 48, 0.8)'; }}
               title="Close"
             >
               ×
             </button>
           </div>
+        )}
 
-            {/* Section 1: 세션 시간 */}
-            <div 
-              onMouseDown={(e) => e.stopPropagation()}
-              style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-                justifyContent: 'center',
-                gap: '4px',
-                minWidth: '140px',
-                paddingRight: '12px',
-                borderRight: '1px solid rgba(0, 0, 0, 0.1)'
-              }}
-            >
-              {/* OCR Status + Control Buttons */}
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                marginBottom: '4px'
-              }}>
-                <span style={{ fontSize: '10px' }}>{ocrHealthy ? '🟢' : '🔴'}</span>
-              <button
-                onClick={handleToggleTracking}
-                disabled={!hasAnyRoi || !ocrHealthy}
-                style={{
-                    width: '32px',
-                    height: '32px',
-                    borderRadius: '8px',
-                  border: 'none',
-                    background: !hasAnyRoi || !ocrHealthy
-                    ? 'rgba(0, 0, 0, 0.1)'
-                    : trackingState === 'tracking'
-                        ? 'linear-gradient(135deg, #2196F3 0%, #1976D2 100%)'
-                      : 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)',
-                    cursor: (hasAnyRoi && ocrHealthy) ? 'pointer' : 'not-allowed',
-                  transition: 'all 0.2s ease',
-                    boxShadow: (hasAnyRoi && ocrHealthy) ? '0 2px 6px rgba(0, 0, 0, 0.15)' : 'none',
-                  padding: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                    opacity: (hasAnyRoi && ocrHealthy) ? 1 : 0.5
-                }}
-                title={!hasAnyRoi ? 'ROI 설정 필요' : trackingState === 'tracking' ? '일시정지' : '시작'}
-              >
-                <img
-                  src={trackingState === 'tracking' ? pauseIcon : startIcon}
-                  alt={trackingState === 'tracking' ? 'Pause' : 'Start'}
-                    style={{ width: '20px', height: '20px' }}
-                />
-              </button>
-              <button
-                onClick={handleReset}
-                disabled={trackingState === 'idle'}
-                style={{
-                    width: '24px',
-                    height: '24px',
-                  borderRadius: '6px',
-                  border: '1px solid rgba(0, 0, 0, 0.1)',
-                  background: 'rgba(0, 0, 0, 0.05)',
-                  cursor: trackingState !== 'idle' ? 'pointer' : 'not-allowed',
-                  transition: 'all 0.15s ease',
-                  padding: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  opacity: trackingState !== 'idle' ? 1 : 0.3
-                }}
-                title="리셋"
-              >
-                  <img src={resetIcon} alt="Reset" style={{ width: '14px', height: '14px' }} />
-              </button>
-              <button
-                  onClick={handleOpenRoiModal}
-                style={{
-                    width: '24px',
-                    height: '24px',
-                  background: 'rgba(0, 0, 0, 0.05)',
-                  border: '1px solid rgba(0, 0, 0, 0.1)',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                  padding: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}
-                  title="ROI 설정"
-                >
-                  <img src={roiIcon} alt="ROI" style={{ width: '14px', height: '14px' }} />
-              </button>
-              <button
-                  onClick={handleOpenSettings}
-                style={{
-                    width: '24px',
-                    height: '24px',
-                    background: 'rgba(0, 0, 0, 0.05)',
-                    border: '1px solid rgba(0, 0, 0, 0.1)',
-                  borderRadius: '6px',
-                    cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                  padding: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                    justifyContent: 'center'
-                }}
-                  title="설정"
-              >
-                  <img src={settingIcon} alt="Settings" style={{ width: '14px', height: '14px' }} />
-              </button>
-              </div>
-
-              {/* Timer */}
-              <div style={{
-                fontSize: '24px',
-                fontWeight: 600,
-                color: trackingState === 'tracking' ? '#2196F3' : '#666'
-              }}>
-                {formatTime(elapsedSeconds)}
-              </div>
-              <div style={{
-                fontSize: '15px',
-                fontWeight: 600,
-                color: '#999'
-              }}>
-                {targetDuration > 0 && trackingState === 'tracking' ? (
-                  (() => {
-                    const now = new Date();
-                    const targetTime = new Date(now.getTime() + (targetDuration * 60 - elapsedSeconds) * 1000);
-                    const hours = Math.floor(targetDuration / 60);
-                    const minutes = targetDuration % 60;
-                    
-                    let timeLabel = '';
-                    if (hours > 0 && minutes > 0) {
-                      timeLabel = `${hours}시간 ${minutes}분`;
-                    } else if (hours > 0) {
-                      timeLabel = `${hours}시간`;
-                    } else {
-                      timeLabel = `${minutes}분`;
-                    }
-                    
-                    const targetHours = targetTime.getHours().toString().padStart(2, '0');
-                    const targetMinutes = targetTime.getMinutes().toString().padStart(2, '0');
-                    const targetSeconds = targetTime.getSeconds().toString().padStart(2, '0');
-                    
-                    return `${timeLabel} 뒤: ${targetHours}:${targetMinutes}:${targetSeconds}`;
-                  })()
-                ) : (
-                  '세션 시간'
-                )}
-              </div>
-            </div>
-
-            {/* Section 2: 경험치 */}
-            <div style={{
+        {/* Main Content Area */}
+        <main
+          style={{
+            width: '100%',
+            height: '100%',
+            boxSizing: 'border-box',
+            paddingTop: '32px', // Provides space for the absolute-positioned controls
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          <div
+            style={{
               flex: 1,
               display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'center',
-              gap: '6px',
-              paddingLeft: '12px',
-              paddingRight: '0px',
-              borderRight: '1px solid rgba(0, 0, 0, 0.1)'
-            }}>
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '90px'
-              }}>
-                <div>
+              flexDirection: (showSettings || showMesoModal || showRoiModal) ? 'column' : 'row',
+              alignItems: (showSettings || showMesoModal || showRoiModal) ? 'stretch' : 'center',
+              padding: isSelecting ? '0' : (showSettings || showMesoModal || showRoiModal) ? '0' : '0 12px 8px 12px',
+              gap: '4px',
+              userSelect: (showSettings || showMesoModal || showRoiModal) ? 'auto' : 'none',
+              overflow: (showSettings || showMesoModal || showRoiModal) ? 'auto' : 'hidden',
+            }}
+          >
+            {!isSelecting && !showSettings && !showMesoModal && !showRoiModal && (
+              <>
+                {/* Section 1: 세션 시간 */}
+                <div 
+                  onMouseDown={(e) => e.stopPropagation()}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '4px',
+                    minWidth: '160px',
+                    paddingRight: '12px',
+                    borderRight: '1px solid rgba(0, 0, 0, 0.1)',
+                    cursor: 'default',
+                  }}
+                >
+                  {/* Control Buttons */}
                   <div style={{
-                    fontSize: '14px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    marginBottom: '4px'
+                  }}>
+                  <button
+                    onClick={handleToggleTracking}
+                    disabled={!hasAnyRoi || !ocrHealthy}
+                    style={{
+                        width: '32px',
+                        height: '32px',
+                        borderRadius: '8px',
+                      border: 'none',
+                        background: !hasAnyRoi || !ocrHealthy
+                        ? 'rgba(0, 0, 0, 0.1)'
+                        : trackingState === 'tracking'
+                            ? 'linear-gradient(135deg, #2196F3 0%, #1976D2 100%)'
+                          : 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)',
+                        cursor: (hasAnyRoi && ocrHealthy) ? 'pointer' : 'not-allowed',
+                      transition: 'all 0.2s ease',
+                        boxShadow: (hasAnyRoi && ocrHealthy) ? '0 2px 6px rgba(0, 0, 0, 0.15)' : 'none',
+                      padding: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                        opacity: (hasAnyRoi && ocrHealthy) ? 1 : 0.5
+                    }}
+                    title={!hasAnyRoi ? 'ROI 설정 필요' : trackingState === 'tracking' ? '일시정지' : '시작'}
+                  >
+                    <img
+                      src={trackingState === 'tracking' ? pauseIcon : startIcon}
+                      alt={trackingState === 'tracking' ? 'Pause' : 'Start'}
+                        style={{ width: '20px', height: '20px' }}
+                    />
+                  </button>
+                  <button
+                    onClick={handleReset}
+                    disabled={trackingState === 'idle'}
+                    style={{
+                        width: '24px',
+                        height: '24px',
+                      borderRadius: '6px',
+                      border: '1px solid rgba(0, 0, 0, 0.1)',
+                      background: 'rgba(0, 0, 0, 0.05)',
+                      cursor: trackingState !== 'idle' ? 'pointer' : 'not-allowed',
+                      transition: 'all 0.15s ease',
+                      padding: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      opacity: trackingState !== 'idle' ? 1 : 0.3
+                    }}
+                    title="리셋"
+                  >
+                      <img src={resetIcon} alt="Reset" style={{ width: '14px', height: '14px' }} />
+                  </button>
+                  <button
+                      onClick={handleOpenRoiModal}
+                    style={{
+                        width: '24px',
+                        height: '24px',
+                      background: 'rgba(0, 0, 0, 0.05)',
+                      border: '1px solid rgba(0, 0, 0, 0.1)',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                      padding: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                      title="ROI 설정"
+                    >
+                      <img src={roiIcon} alt="ROI" style={{ width: '14px', height: '14px' }} />
+                  </button>
+                  <button
+                      onClick={handleOpenSettings}
+                    style={{
+                        width: '24px',
+                        height: '24px',
+                        background: 'rgba(0, 0, 0, 0.05)',
+                        border: '1px solid rgba(0, 0, 0, 0.1)',
+                      borderRadius: '6px',
+                        cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                      padding: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                        justifyContent: 'center'
+                    }}
+                      title="설정"
+                  >
+                      <img src={settingIcon} alt="Settings" style={{ width: '14px', height: '14px' }} />
+                  </button>
+                  </div>
+
+                  {/* Timer */}
+                  <div style={{
+                    fontSize: '28px',
                     fontWeight: 600,
-                    color: '#666'
+                    color: trackingState === 'tracking' ? '#2196F3' : '#666'
                   }}>
-                    레벨업까지
+                    {formatTime(elapsedSeconds)}
                   </div>
                   <div style={{
-                    fontSize: '18px',
-                    fontWeight: '700',
-                    color: '#d32f2f'
-                  }}>
-                    {levelUpETA}
-                  </div>
-                </div>
-                <div>
-                  <div style={{
-                    fontSize: '14px',
+                    fontSize: '12px',
                     fontWeight: 600,
-                    color: '#666'
+                    color: '#999',
+                    textAlign: 'center'
                   }}>
-                    획득 경험치
+                    {targetDuration > 0 && trackingState === 'tracking' ? (
+                      (() => {
+                        const now = new Date();
+                        const targetTime = new Date(now.getTime() + (targetDuration * 60 - elapsedSeconds) * 1000);
+                        const hours = Math.floor(targetDuration / 60);
+                        const minutes = targetDuration % 60;
+                        
+                        let timeLabel = '';
+                        if (hours > 0 && minutes > 0) {
+                          timeLabel = `${hours}시간 ${minutes}분`;
+                        } else if (hours > 0) {
+                          timeLabel = `${hours}시간`;
+                        } else {
+                          timeLabel = `${minutes}분`;
+                        }
+                        
+                        const targetHours = targetTime.getHours().toString().padStart(2, '0');
+                        const targetMinutes = targetTime.getMinutes().toString().padStart(2, '0');
+                        const targetSeconds = targetTime.getSeconds().toString().padStart(2, '0');
+                        
+                        return `${timeLabel} 뒤: ${targetHours}:${targetMinutes}:${targetSeconds}`;
+                      })()
+                    ) : (
+                      '세션 시간'
+                    )}
+                  </div>
+                </div>
+
+                {/* Section 2: 경험치 정보 */}
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'center',
+                  gap: '4px',
+                  paddingLeft: '12px',
+                  paddingRight: '12px',
+                  borderRight: '1px solid rgba(0, 0, 0, 0.1)',
+                  cursor: 'default',
+                }}>
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '20px'
+                  }}>
+                    <div>
+                      <div style={{
+                        fontSize: '14px',
+                        fontWeight: 600,
+                        color: '#666'
+                      }}>
+                        레벨업까지
+                      </div>
+                      <div style={{
+                        fontSize: '16px',
+                        fontWeight: '700',
+                        color: '#d32f2f'
+                      }}>
+                        {levelUpETA}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{
+                        fontSize: '14px',
+                        fontWeight: 600,
+                        color: '#666'
+                      }}>
+                        획득 경험치
+                      </div>
+                      <div style={{
+                        fontSize: '16px',
+                        fontWeight: '700',
+                        color: '#2196F3'
+                      }}>
+                        {parallelOcrTracker.stats?.total_exp?.toLocaleString('ko-KR') || '0'}
+                      </div>
+                    </div>
                   </div>
                   <div style={{
-                    fontSize: '16px',
-                    fontWeight: '700',
-                    color: '#2196F3'
+                    fontSize: '11px',
+                    color: '#666',
                   }}>
-                    {parallelOcrTracker.stats?.total_exp?.toLocaleString('ko-KR') || '0'}
+                    현재: Lv.{parallelOcrTracker.stats?.level || '?'} ({parallelOcrTracker.stats?.percentage?.toFixed(2) || '0.00'}%) | 시간당: {formatCompact(parallelOcrTracker.stats?.exp_per_hour || 0)}
                   </div>
                 </div>
-              </div>
-              <div style={{
-                fontSize: '13px',
-                color: '#666',
-                borderTop: '1px solid rgba(0, 0, 0, 0.05)',
-                paddingTop: '4px'
-              }}>
-                현재: Lv.{parallelOcrTracker.stats?.level || '?'} ({parallelOcrTracker.stats?.percentage?.toFixed(2) || '0.00'}%) | 시간당: {parallelOcrTracker.stats?.exp_per_hour?.toLocaleString('ko-KR') || '0'}
-              </div>
-            </div>
 
-            {/* Section 3: 포션 */}
-            <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'center',
-              gap: '8px',
-              minWidth: '80px',
-              paddingLeft: '2px'
-            }}>
-              {/* HP Potion */}
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}>
-                <img src={hpIcon} alt="HP" style={{ width: '32px', height: '32px' }} />
+                {/* Section 3: 포션 사용 */}
                 <div style={{
-                  fontSize: '16px',
-                  fontWeight: '700',
-                  color: '#f44336'
-                }}>
-                  {parallelOcrTracker.stats?.hp_potions_used || 0}
-                </div>
-              </div>
-
-              {/* MP Potion */}
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}>
-                <img src={mpIcon} alt="MP" style={{ width: '32px', height: '32px' }} />
-                <div style={{
-                  fontSize: '16px',
-                  fontWeight: '700',
-                  color: '#2196F3'
-                }}>
-                  {parallelOcrTracker.stats?.mp_potions_used || 0}
-                </div>
-              </div>
-            </div>
-          </>
-        )}
-
-        {!isSelecting && showSettings && (
-          <>
-            {/* Draggable Title Bar for Settings */}
-            <div
-              onMouseDown={handleDragStart}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                height: '40px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'move',
-                zIndex: 999,
-                userSelect: 'none'
-              }}
-            >
-              <span style={{
-                fontSize: '12px',
-                fontWeight: '600',
-                color: '#999'
-              }}>
-                설정
-              </span>
-            </div>
-
-            {/* Back Button */}
-              <button
-              onClick={handleCloseSettings}
-              onMouseDown={(e) => e.stopPropagation()}
-                style={{
-                position: 'absolute',
-                top: '8px',
-                left: '8px',
-                padding: '6px 12px',
-                fontSize: '13px',
-                background: 'rgba(255, 255, 255, 0.95)',
-                color: '#333',
-                border: '1px solid rgba(0, 0, 0, 0.2)',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                fontWeight: '600',
-                zIndex: 1000,
-                boxShadow: '0 2px 6px rgba(0, 0, 0, 0.1)'
-                }}
-                onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'rgba(240, 240, 240, 1)';
-                  e.currentTarget.style.transform = 'scale(1.05)';
-                }}
-                onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.95)';
-                  e.currentTarget.style.transform = 'scale(1)';
-                }}
-              >
-              ← 뒤로
-              </button>
-
-            {/* Window Controls */}
-            <div
-              onMouseDown={(e) => e.stopPropagation()}
-              style={{
-                position: 'absolute',
-                top: '6px',
-                right: '8px',
-                display: 'flex',
-                gap: '4px',
-                zIndex: 1000
-              }}
-            >
-              <button
-                onClick={handleMinimize}
-                style={{
-                  width: '20px',
-                  height: '20px',
-                  borderRadius: '4px',
-                  border: 'none',
-                  background: 'rgba(0, 0, 0, 0.3)',
-                  color: '#fff',
-                  fontSize: '14px',
-                  fontWeight: '300',
-                  cursor: 'pointer',
                   display: 'flex',
-                  alignItems: 'center',
+                  flexDirection: 'column',
                   justifyContent: 'center',
-                  transition: 'all 0.15s ease',
-                  paddingBottom: '2px',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'rgba(0, 0, 0, 0.5)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'rgba(0, 0, 0, 0.3)';
-                }}
-                title="Minimize"
-              >
-                −
-              </button>
-            <button
-                onClick={handleClose}
-              style={{
-                  width: '20px',
-                  height: '20px',
-                  borderRadius: '4px',
-                  border: 'none',
-                  background: 'rgba(255, 59, 48, 0.8)',
-                  color: '#fff',
-                  fontSize: '14px',
-                  fontWeight: '300',
-                cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                transition: 'all 0.15s ease',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = '#ff3b30';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'rgba(255, 59, 48, 0.8)';
-                }}
-                title="Close"
-              >
-                ×
-            </button>
-            </div>
+                  gap: '2px',
+                  paddingLeft: '12px',
+                  minWidth: '80px',
+                  cursor: 'default',
+                }}>
+                  <div style={{ 
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    marginBottom: '2px'
+                  }}>
+                    <span style={{
+                      fontWeight: 600, 
+                      color: '#666', 
+                      fontSize: '14px',
+                    }}>
+                      포션 사용
+                    </span>
+                    <button
+                      onClick={handleOpenMesoModal}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      style={{
+                        width: '24px',
+                        height: '24px',
+                        background: 'rgba(255, 193, 7, 0.1)',
+                        border: '1px solid rgba(255, 193, 7, 0.3)',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                        padding: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '14px'
+                      }}
+                      title="메소 관리"
+                    >
+                      💰
+                    </button>
+                  </div>
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}>
+                    <img src={hpIcon} alt="HP" style={{ width: '18px', height: '18px' }} />
+                    <div style={{
+                      fontSize: '13px',
+                      fontWeight: '700',
+                      color: '#f44336'
+                    }}>
+                      {parallelOcrTracker.stats?.hp_potions_used || 0}
+                    </div>
+                  </div>
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}>
+                    <img src={mpIcon} alt="MP" style={{ width: '18px', height: '18px' }} />
+                    <div style={{
+                      fontSize: '13px',
+                      fontWeight: '700',
+                      color: '#2196F3'
+                    }}>
+                      {parallelOcrTracker.stats?.mp_potions_used || 0}
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
 
-            {/* Settings Content with Top Padding */}
-            <div style={{ paddingTop: '40px' }}>
-            <Settings />
-            </div>
-          </>
-        )}
-      </main>
+            {showRoiModal && (
+              <>
+                {!isSelecting && (
+                  <>
+                    {/* Draggable Title Bar for ROI */}
+                    <div
+                      onMouseDown={handleDragStart}
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        height: '40px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'move',
+                        zIndex: 999,
+                        userSelect: 'none'
+                      }}
+                    >
+                      <span style={{
+                        fontSize: '12px',
+                        fontWeight: '600',
+                        color: '#999'
+                      }}>
+                        영역 설정
+                      </span>
+                    </div>
 
-      {/* ROI Configuration Modal */}
-      <RoiConfigModal
-        isOpen={showRoiModal}
-        onClose={handleCloseRoiModal}
-        onSelectingChange={handleSelectingChange}
-      />
+                    {/* Back Button */}
+                    <button
+                      onClick={handleCloseRoiModal}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      style={{
+                        position: 'absolute',
+                        top: '8px',
+                        left: '8px',
+                        padding: '6px 12px',
+                        fontSize: '13px',
+                        background: 'rgba(255, 255, 255, 0.95)',
+                        color: '#333',
+                        border: '1px solid rgba(0, 0, 0, 0.2)',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                        fontWeight: '600',
+                        zIndex: 1000,
+                        boxShadow: '0 2px 6px rgba(0, 0, 0, 0.1)'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = 'rgba(240, 240, 240, 1)';
+                        e.currentTarget.style.transform = 'scale(1.05)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'rgba(255, 255, 255, 0.95)';
+                        e.currentTarget.style.transform = 'scale(1)';
+                      }}
+                    >
+                      ← 뒤로
+                    </button>
+                  </>
+                )}
 
+                {/* ROI Content with Top Padding */}
+                <div style={{ paddingTop: isSelecting ? '0' : '10px', width: '100%', height: '100%', visibility: isSelecting ? 'hidden' : 'visible' }}>
+                  <CompactRoiManager onSelectingChange={handleSelectingChange} />
+                </div>
+              </>
+            )}
+
+            {!isSelecting && showSettings && (
+              <>
+                {/* Draggable Title Bar for Settings */}
+                <div
+                  onMouseDown={handleDragStart}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    height: '40px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'move',
+                    zIndex: 999,
+                    userSelect: 'none'
+                  }}
+                >
+                  <span style={{
+                    fontSize: '12px',
+                    fontWeight: '600',
+                    color: '#999'
+                  }}>
+                    설정
+                  </span>
+                </div>
+
+                {/* Back Button */}
+                  <button
+                  onClick={handleCloseSettings}
+                  onMouseDown={(e) => e.stopPropagation()}
+                    style={{
+                    position: 'absolute',
+                    top: '8px',
+                    left: '8px',
+                    padding: '6px 12px',
+                    fontSize: '13px',
+                    background: 'rgba(255, 255, 255, 0.95)',
+                    color: '#333',
+                    border: '1px solid rgba(0, 0, 0, 0.2)',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    fontWeight: '600',
+                    zIndex: 1000,
+                    boxShadow: '0 2px 6px rgba(0, 0, 0, 0.1)'
+                    }}
+                    onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(240, 240, 240, 1)';
+                      e.currentTarget.style.transform = 'scale(1.05)';
+                    }}
+                    onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.95)';
+                      e.currentTarget.style.transform = 'scale(1)';
+                    }}
+                  >
+                  ← 뒤로
+                  </button>
+
+                {/* Settings Content with Top Padding */}
+                <div style={{ paddingTop: '40px', width: '100%', height: '100%' }}>
+                <Settings />
+                </div>
+              </>
+            )}
+
+            {!isSelecting && showMesoModal && (
+              <>
+                {/* Draggable Title Bar for Meso Management */}
+                <div
+                  onMouseDown={handleDragStart}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    height: '40px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'move',
+                    zIndex: 999,
+                    userSelect: 'none'
+                  }}
+                >
+                  <span style={{
+                    fontSize: '12px',
+                    fontWeight: '600',
+                    color: '#999'
+                  }}>
+                    메소 관리
+                  </span>
+                </div>
+
+                {/* Back Button */}
+                <button
+                  onClick={handleCloseMesoModal}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  style={{
+                    position: 'absolute',
+                    top: '8px',
+                    left: '8px',
+                    padding: '6px 12px',
+                    fontSize: '13px',
+                    background: 'rgba(255, 255, 255, 0.95)',
+                    color: '#333',
+                    border: '1px solid rgba(0, 0, 0, 0.2)',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    fontWeight: '600',
+                    zIndex: 1000,
+                    boxShadow: '0 2px 6px rgba(0, 0, 0, 0.1)'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(240, 240, 240, 1)';
+                    e.currentTarget.style.transform = 'scale(1.05)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.95)';
+                    e.currentTarget.style.transform = 'scale(1)';
+                  }}
+                >
+                  ← 뒤로
+                </button>
+
+                {/* Meso Management Content with Top Padding */}
+                <div style={{ paddingTop: '50px', padding: '50px 35px 25px 35px', width: '100%', display: 'flex', flexDirection: 'column', gap: '16px', boxSizing: 'border-box' }}>
+                  <p style={{ margin: '0', fontSize: '13px', color: '#666', lineHeight: '1.5' }}>
+                    사냥 전후 메소와 포션 단가를 입력하세요.
+                  </p>
+
+                  {/* 2x2 Grid Input Section */}
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 1fr',
+                    gap: '12px'
+                  }}>
+                    {/* 시작 메소 */}
+                    <div>
+                      <label style={{ display: 'block', fontSize: '12px', color: '#666', marginBottom: '6px', fontWeight: '600' }}>
+                        💰 시작 메소
+                      </label>
+                      <input
+                        type="text"
+                        value={mesoInputStart && !isNaN(parseInt(mesoInputStart)) ? parseInt(mesoInputStart).toLocaleString('ko-KR') : mesoInputStart}
+                        onChange={(e) => {
+                          const value = e.target.value.replace(/,/g, '');
+                          if (value === '' || /^\d+$/.test(value)) {
+                            setMesoInputStart(value);
+                          }
+                        }}
+                        placeholder="시작 메소"
+                        style={{
+                          width: '100%',
+                          padding: '8px',
+                          fontSize: '13px',
+                          border: '2px solid #e0e0e0',
+                          borderRadius: '6px',
+                          boxSizing: 'border-box',
+                          outline: 'none',
+                          transition: 'border-color 0.15s ease',
+                        }}
+                        onFocus={(e) => {
+                          e.currentTarget.style.borderColor = '#FFC107';
+                        }}
+                        onBlur={(e) => {
+                          e.currentTarget.style.borderColor = '#e0e0e0';
+                        }}
+                      />
+                    </div>
+
+                    {/* 종료 메소 */}
+                    <div>
+                      <label style={{ display: 'block', fontSize: '12px', color: '#666', marginBottom: '6px', fontWeight: '600' }}>
+                        💰 종료 메소
+                      </label>
+                      <input
+                        type="text"
+                        value={mesoInputEnd && !isNaN(parseInt(mesoInputEnd)) ? parseInt(mesoInputEnd).toLocaleString('ko-KR') : mesoInputEnd}
+                        onChange={(e) => {
+                          const value = e.target.value.replace(/,/g, '');
+                          if (value === '' || /^\d+$/.test(value)) {
+                            setMesoInputEnd(value);
+                          }
+                        }}
+                        placeholder="종료 메소"
+                        style={{
+                          width: '100%',
+                          padding: '8px',
+                          fontSize: '13px',
+                          border: '2px solid #e0e0e0',
+                          borderRadius: '6px',
+                          boxSizing: 'border-box',
+                          outline: 'none',
+                          transition: 'border-color 0.15s ease',
+                        }}
+                        onFocus={(e) => {
+                          e.currentTarget.style.borderColor = '#FFC107';
+                        }}
+                        onBlur={(e) => {
+                          e.currentTarget.style.borderColor = '#e0e0e0';
+                        }}
+                      />
+                    </div>
+
+                    {/* HP 포션 단가 */}
+                    <div>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#666', marginBottom: '6px', fontWeight: '600' }}>
+                        <img src={hpIcon} alt="HP" style={{ width: '16px', height: '16px' }} />
+                        HP 포션 단가
+                      </label>
+                      <input
+                        type="text"
+                        value={potionPriceInputHp && !isNaN(parseInt(potionPriceInputHp)) ? parseInt(potionPriceInputHp).toLocaleString('ko-KR') : potionPriceInputHp}
+                        onChange={(e) => {
+                          const value = e.target.value.replace(/,/g, '');
+                          if (value === '' || /^\d+$/.test(value)) {
+                            setPotionPriceInputHp(value);
+                          }
+                        }}
+                        placeholder="HP 포션 단가"
+                        style={{
+                          width: '100%',
+                          padding: '8px',
+                          fontSize: '13px',
+                          border: '2px solid #e0e0e0',
+                          borderRadius: '6px',
+                          boxSizing: 'border-box',
+                          outline: 'none',
+                          transition: 'border-color 0.15s ease',
+                        }}
+                        onFocus={(e) => {
+                          e.currentTarget.style.borderColor = '#f44336';
+                        }}
+                        onBlur={(e) => {
+                          e.currentTarget.style.borderColor = '#e0e0e0';
+                        }}
+                      />
+                    </div>
+
+                    {/* MP 포션 단가 */}
+                    <div>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#666', marginBottom: '6px', fontWeight: '600' }}>
+                        <img src={mpIcon} alt="MP" style={{ width: '16px', height: '16px' }} />
+                        MP 포션 단가
+                      </label>
+                      <input
+                        type="text"
+                        value={potionPriceInputMp && !isNaN(parseInt(potionPriceInputMp)) ? parseInt(potionPriceInputMp).toLocaleString('ko-KR') : potionPriceInputMp}
+                        onChange={(e) => {
+                          const value = e.target.value.replace(/,/g, '');
+                          if (value === '' || /^\d+$/.test(value)) {
+                            setPotionPriceInputMp(value);
+                          }
+                        }}
+                        placeholder="MP 포션 단가"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleMesoSubmit();
+                          }
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '8px',
+                          fontSize: '13px',
+                          border: '2px solid #e0e0e0',
+                          borderRadius: '6px',
+                          boxSizing: 'border-box',
+                          outline: 'none',
+                          transition: 'border-color 0.15s ease',
+                        }}
+                        onFocus={(e) => {
+                          e.currentTarget.style.borderColor = '#2196F3';
+                        }}
+                        onBlur={(e) => {
+                          e.currentTarget.style.borderColor = '#e0e0e0';
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Calculate Button */}
+                  <div style={{ display: 'flex', justifyContent: 'center' }}>
+                    <button
+                      onClick={handleMesoCalculate}
+                      style={{
+                        padding: '10px 24px',
+                        fontSize: '13px',
+                        fontWeight: '600',
+                        background: 'linear-gradient(135deg, #2196F3 0%, #1976D2 100%)',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                        boxShadow: '0 2px 6px rgba(0, 0, 0, 0.15)',
+                        width: '100%'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = 'translateY(-1px)';
+                        e.currentTarget.style.boxShadow = '0 4px 8px rgba(0, 0, 0, 0.2)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = 'translateY(0)';
+                        e.currentTarget.style.boxShadow = '0 2px 6px rgba(0, 0, 0, 0.15)';
+                      }}
+                    >
+                      💰 계산
+                    </button>
+                  </div>
+
+                  {/* Result Section */}
+                  {(() => {
+                    const usePreview = previewMeso !== null;
+                    const currentStartMeso = usePreview ? previewMeso.start : startMeso;
+                    const currentEndMeso = usePreview ? previewMeso.end : endMeso;
+                    const currentHpPrice = usePreview ? previewMeso.hpPrice : hpPotionPrice;
+                    const currentMpPrice = usePreview ? previewMeso.mpPrice : mpPotionPrice;
+                    
+                    const hasPotionPrice = currentHpPrice > 0 || currentMpPrice > 0;
+                    const hasMesoData = currentStartMeso !== null && currentEndMeso !== null;
+                    const hpUsed = parallelOcrTracker.stats?.hp_potions_used || 0;
+                    const mpUsed = parallelOcrTracker.stats?.mp_potions_used || 0;
+                    
+                    let mesoGained = 0;
+                    if (hasMesoData && currentEndMeso !== null && currentStartMeso !== null) {
+                      mesoGained = currentEndMeso - currentStartMeso;
+                    }
+                    
+                    const potionCost = (hpUsed * currentHpPrice) + (mpUsed * currentMpPrice);
+                    const netProfit = mesoGained - potionCost;
+
+                    if (hasMesoData || hasPotionPrice) {
+                      return (
+                        <div style={{
+                          background: 'rgba(33, 150, 243, 0.05)',
+                          border: '1px solid rgba(33, 150, 243, 0.2)',
+                          borderRadius: '8px',
+                          padding: '12px'
+                        }}>
+                          <h3 style={{ margin: '0 0 8px 0', fontSize: '13px', fontWeight: '700', color: '#666' }}>
+                            📊 수익 계산 {usePreview && <span style={{ fontSize: '11px', color: '#2196F3' }}>(미리보기)</span>}
+                          </h3>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px' }}>
+                            {hasMesoData && (
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span style={{ color: '#666' }}>메소 획득</span>
+                                <span style={{ fontWeight: '700', color: '#4CAF50' }}>
+                                  +{mesoGained.toLocaleString('ko-KR')}
+                                </span>
+                              </div>
+                            )}
+                            {hasPotionPrice && (
+                              <>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <span style={{ color: '#666' }}>포션 비용</span>
+                                  <span style={{ fontWeight: '700', color: '#FF9800' }}>
+                                    -{potionCost.toLocaleString('ko-KR')}
+                                  </span>
+                                </div>
+                                <div style={{ fontSize: '11px', color: '#999', marginLeft: '8px' }}>
+                                  HP {hpUsed}개 × {currentHpPrice.toLocaleString('ko-KR')} + MP {mpUsed}개 × {currentMpPrice.toLocaleString('ko-KR')}
+                                </div>
+                              </>
+                            )}
+                            {hasMesoData && (
+                              <>
+                                <div style={{ height: '1px', background: 'rgba(0, 0, 0, 0.1)', margin: '2px 0' }} />
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <span style={{ fontWeight: '700', color: '#666' }}>순이익</span>
+                                  <span style={{ fontSize: '14px', fontWeight: '700', color: netProfit >= 0 ? '#4CAF50' : '#f44336' }}>
+                                    {netProfit.toLocaleString('ko-KR')}
+                                  </span>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
+
+                  <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '8px' }}>
+                    <button
+                      onClick={handleCloseMesoModal}
+                      style={{
+                        padding: '8px 20px',
+                        fontSize: '13px',
+                        fontWeight: '600',
+                        background: '#f5f5f5',
+                        color: '#666',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = '#e0e0e0';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = '#f5f5f5';
+                      }}
+                    >
+                      취소
+                    </button>
+                    <button
+                      onClick={handleMesoSubmit}
+                      style={{
+                        padding: '8px 20px',
+                        fontSize: '13px',
+                        fontWeight: '600',
+                        background: 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                        boxShadow: '0 2px 6px rgba(0, 0, 0, 0.15)',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = 'translateY(-1px)';
+                        e.currentTarget.style.boxShadow = '0 4px 8px rgba(0, 0, 0, 0.2)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = 'translateY(0)';
+                        e.currentTarget.style.boxShadow = '0 2px 6px rgba(0, 0, 0, 0.15)';
+                      }}
+                    >
+                      💾 저장
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </main>
+      </div>
       {/* Timer Settings Modal */}
       <TimerSettingsModal
         isOpen={showTimerSettings}
         onClose={() => setShowTimerSettings(false)}
       />
+
     </div>
   );
 }

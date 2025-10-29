@@ -1,5 +1,5 @@
 import React from 'react';
-import { formatNumber, formatPercentage, type ExpStats } from '../lib/expCommands';
+import { formatNumber, formatPercentage, formatCompact, type ExpStats } from '../lib/expCommands';
 import './ExpTrackerDisplay.css';
 
 export interface ExpTrackerDisplayProps {

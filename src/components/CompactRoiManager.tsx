@@ -44,6 +44,8 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
   const [isSelecting, setIsSelecting] = useState(false);
   const [currentRoiType, setCurrentRoiType] = useState<RoiType | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [previewRoiType, setPreviewRoiType] = useState<RoiType | null>(null);
   const windowStateRef = useRef<WindowState | null>(null);
 
   const { levelRoi, expRoi, hpRoi, mpRoi, setRoi, removeRoi, loadAllRois } = useRoiStore();
@@ -133,10 +135,17 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
 
   const handleViewPreview = async (type: RoiType) => {
     try {
-      await invoke('open_roi_preview', { roiType: type });
+      const imageData = await invoke<string>('get_roi_preview', { roiType: type });
+      setPreviewImage(imageData);
+      setPreviewRoiType(type);
     } catch (err) {
-      console.error('Failed to open preview:', err);
+      console.error('Failed to load preview:', err);
     }
+  };
+
+  const handleClosePreview = () => {
+    setPreviewImage(null);
+    setPreviewRoiType(null);
   };
 
   const handleRemoveRoi = async (type: RoiType) => {
@@ -149,57 +158,91 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
     document.body
   ) : null;
 
+  const getLabelForType = (type: RoiType): string => {
+    const config = ROI_CONFIGS.find(c => c.type === type);
+    return config?.label || '';
+  };
+
   return (
     <>
       <div className="compact-roi-manager">
-        <div className="roi-buttons">
-          {ROI_CONFIGS.map(({ type, label, icon, color }) => {
-            const roi = getRoi(type);
-            const isConfigured = roi !== null;
+        <div className="compact-roi-manager-wrapper">
+          {/* Buttons Container */}
+          <div className={`roi-buttons-container ${previewImage ? 'slide-out' : ''}`}>
+            <div className="roi-buttons">
+              {ROI_CONFIGS.map(({ type, label, icon, color }) => {
+                const roi = getRoi(type);
+                const isConfigured = roi !== null;
 
-            return (
-              <div key={type} className="roi-button-group">
-                <button
-                  onClick={() => handleSelectClick(type)}
-                  disabled={!isInitialized}
-                  className="roi-select-btn"
-                  style={{ borderColor: color }}
-                  title={`${label} 영역 ${isConfigured ? '재' : ''}선택`}
-                >
-                  <img src={icon} alt={label} className="roi-icon-img" />
-                  <span className="roi-label">{label}</span>
-                  {isConfigured && <span className="roi-check">✓</span>}
-                </button>
+                return (
+                  <div key={type} className="roi-button-group">
+                    <button
+                      onClick={() => handleSelectClick(type)}
+                      disabled={!isInitialized}
+                      className="roi-select-btn"
+                      style={{ borderColor: color }}
+                      title={`${label} 영역 ${isConfigured ? '재' : ''}선택`}
+                    >
+                      <img src={icon} alt={label} className="roi-icon-img" />
+                      <span className="roi-label">{label}</span>
+                      {isConfigured && <span className="roi-check">✓</span>}
+                    </button>
 
-                {isConfigured && (
-                  <div className="roi-actions-compact">
-                    <button
-                      onClick={() => handleViewPreview(type)}
-                      className="roi-action-btn view"
-                      title="미리보기 열기"
-                    >
-                      👁️
-                    </button>
-                    <button
-                      onClick={() => handleRemoveRoi(type)}
-                      className="roi-action-btn delete"
-                      title="삭제"
-                    >
-                      🗑️
-                    </button>
+                    {isConfigured && (
+                      <div className="roi-actions-compact">
+                        <button
+                          onClick={() => handleViewPreview(type)}
+                          className="roi-action-btn view"
+                          title="미리보기"
+                        >
+                          👁️
+                        </button>
+                        <button
+                          onClick={() => handleRemoveRoi(type)}
+                          className="roi-action-btn delete"
+                          title="삭제"
+                        >
+                          🗑️
+                        </button>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+                );
+              })}
+            </div>
 
-        {!isInitialized && (
-          <div className="roi-init-status">
-            <span className="spinner-small"></span>
-            <span>초기화 중...</span>
+            {!isInitialized && (
+              <div className="roi-init-status">
+                <span className="spinner-small"></span>
+                <span>초기화 중...</span>
+              </div>
+            )}
           </div>
-        )}
+
+          {/* Preview Container */}
+          {previewImage && (
+            <div className={`roi-preview-container ${previewImage ? 'slide-in' : ''}`}>
+              <div className="roi-preview-header">
+                <span className="roi-preview-title">
+                  👁️ {getLabelForType(previewRoiType!)}
+                </span>
+                <button
+                  onClick={handleClosePreview}
+                  className="roi-preview-back"
+                >
+                  ← 돌아가기
+                </button>
+              </div>
+              <div className="roi-preview-image-wrapper">
+                <img 
+                  src={previewImage} 
+                  alt={`${getLabelForType(previewRoiType!)} preview`}
+                  className="roi-preview-image"
+                />
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Render RoiSelector as Portal to document.body */}

@@ -1,12 +1,18 @@
 .compact-roi-manager {
-  padding: 4px 8px;
   width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
 }
 
 .roi-buttons {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 8px;
+  gap: 12px;
+  width: 100%;
+  max-width: 480px;
 }
 
 .roi-button-group {
@@ -19,16 +25,17 @@
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 10px;
+  gap: 8px;
+  padding: 12px 14px;
   background: white;
   border: 2px solid;
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.15s ease;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   position: relative;
+  min-height: 50px;
 }
 
 .roi-select-btn:hover:not(:disabled) {
@@ -46,9 +53,10 @@
 }
 
 .roi-icon-img {
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   object-fit: contain;
+  flex-shrink: 0;
 }
 
 .roi-label {
@@ -58,8 +66,9 @@
 }
 
 .roi-check {
-  font-size: 14px;
+  font-size: 16px;
   color: #4CAF50;
+  flex-shrink: 0;
 }
 
 .roi-actions-compact {
@@ -68,8 +77,8 @@
 }
 
 .roi-action-btn {
-  width: 30px;
-  height: 30px;
+  width: 38px;
+  height: 38px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -78,8 +87,9 @@
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.15s ease;
-  font-size: 14px;
+  font-size: 16px;
   padding: 0;
+  flex-shrink: 0;
 }
 
 .roi-action-btn:hover {
@@ -105,6 +115,8 @@
   padding: 12px;
   font-size: 12px;
   color: #666;
+  width: 100%;
+  margin-top: 12px;
 }
 
 .spinner-small {
@@ -119,5 +131,108 @@
 @keyframes spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
+}
+
+.compact-roi-manager-wrapper {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.roi-buttons-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  padding: 16px 20px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.roi-buttons-container.slide-out {
+  display: none;
+}
+
+.roi-preview-container {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 100%;
+  height: 100%;
+  background: white;
+  display: none;
+  flex-direction: column;
+  padding: 8px 16px 16px 16px;
+  box-sizing: border-box;
+}
+
+.roi-preview-container.slide-in {
+  display: flex;
+}
+
+.roi-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.roi-preview-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #333;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.roi-preview-back {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: rgba(0, 0, 0, 0.05);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+  transition: all 0.15s ease;
+}
+
+.roi-preview-back:hover {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.roi-preview-image-wrapper {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fafafa;
+  border-radius: 8px;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid #e0e0e0;
+}
+
+.roi-preview-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  image-rendering: pixelated;
 }
 
