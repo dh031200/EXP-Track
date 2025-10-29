@@ -180,6 +180,29 @@ pub fn save_roi_preview(roi_type: RoiType, image_data: String) -> Result<String,
     Ok(file_path.to_str().unwrap_or("").to_string())
 }
 
+/// Get ROI preview as base64 encoded string
+#[tauri::command]
+pub fn get_roi_preview(roi_type: RoiType) -> Result<String, String> {
+    let temp_dir = std::env::temp_dir().join("exp-tracker-previews");
+    let filename = format!("{}_preview.png", match roi_type {
+        RoiType::Level => "level",
+        RoiType::Exp => "exp",
+        RoiType::Hp => "hp",
+        RoiType::Mp => "mp",
+    });
+    let file_path = temp_dir.join(&filename);
+
+    if !file_path.exists() {
+        return Err("Preview file not found".to_string());
+    }
+
+    let image_bytes = fs::read(&file_path)
+        .map_err(|e| format!("Failed to read preview file: {}", e))?;
+
+    let base64_str = base64::engine::general_purpose::STANDARD.encode(&image_bytes);
+    Ok(format!("data:image/png;base64,{}", base64_str))
+}
+
 /// Open ROI preview in system viewer
 #[tauri::command]
 pub fn open_roi_preview(roi_type: RoiType) -> Result<(), String> {

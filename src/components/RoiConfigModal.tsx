@@ -27,13 +27,6 @@ export function RoiConfigModal({ isOpen, onClose, onSelectingChange }: RoiConfig
 
   return (
     <>
-      {/* Backdrop */}
-      <div
-        className="modal-backdrop"
-        onClick={() => !isSelecting && onClose()}
-        style={{ display: isSelecting ? 'none' : 'block' }}
-      />
-
       {/* Modal */}
       <div className="modal-container" style={{ display: isSelecting ? 'none' : 'flex' }}>
         <div className="modal-header" onMouseDown={handleDragStart}>

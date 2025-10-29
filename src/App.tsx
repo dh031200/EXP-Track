@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { listen } from '@tauri-apps/api/event';
-import { RoiConfigModal } from "./components/RoiConfigModal";
+import { CompactRoiManager } from "./components/CompactRoiManager";
 import { Settings } from "./components/Settings";
 import { TimerSettingsModal } from "./components/TimerSettingsModal";
 import { useSettingsStore } from "./stores/settingsStore";
@@ -404,13 +404,15 @@ function App() {
     setShowRoiModal(true);
     
     const window = getCurrentWindow();
-    await window.setSize(new LogicalSize(450, 380));
+    await window.setResizable(false);
+    await window.setSize(new LogicalSize(520, 360));
   };
 
   const handleCloseRoiModal = async () => {
     setShowRoiModal(false);
     
     const window = getCurrentWindow();
+    await window.setResizable(true);
     await window.setSize(new LogicalSize(510, 140));
   };
 
@@ -620,12 +622,13 @@ function App() {
           display: 'flex',
           flexDirection: 'column',
           position: 'relative',
-          cursor: (!isSelecting && !showSettings && !showMesoModal) ? 'move' : 'default',
+          cursor: (!isSelecting && !showSettings && !showMesoModal && !showRoiModal) ? 'move' : 'default',
+          pointerEvents: isSelecting ? 'none' : 'auto',
         }}
-        onMouseDown={!isSelecting && !showSettings && !showMesoModal ? handleDragStart : undefined}
+        onMouseDown={!isSelecting && !showSettings && !showMesoModal && !showRoiModal ? handleDragStart : undefined}
       >
         {/* OCR Status - Left side of title bar */}
-        {!isSelecting && (
+        {!isSelecting && !showSettings && !showMesoModal && !showRoiModal && (
           <div
             onMouseDown={(e) => e.stopPropagation()}
             style={{
@@ -653,7 +656,7 @@ function App() {
         )}
 
         {/* Window Controls are now positioned relative to this container */}
-        {!isSelecting && (
+        {!isSelecting && !showSettings && !showMesoModal && !showRoiModal && (
           <div
             onMouseDown={(e) => e.stopPropagation()}
             style={{
@@ -731,15 +734,15 @@ function App() {
             style={{
               flex: 1,
               display: 'flex',
-              flexDirection: (showSettings || showMesoModal) ? 'column' : 'row',
-              alignItems: (showSettings || showMesoModal) ? 'stretch' : 'center',
-              padding: isSelecting ? '0' : (showSettings || showMesoModal) ? '0' : '0 12px 8px 12px',
+              flexDirection: (showSettings || showMesoModal || showRoiModal) ? 'column' : 'row',
+              alignItems: (showSettings || showMesoModal || showRoiModal) ? 'stretch' : 'center',
+              padding: isSelecting ? '0' : (showSettings || showMesoModal || showRoiModal) ? '0' : '0 12px 8px 12px',
               gap: '4px',
-              userSelect: (showSettings || showMesoModal) ? 'auto' : 'none',
-              overflow: (showSettings || showMesoModal) ? 'auto' : 'hidden',
+              userSelect: (showSettings || showMesoModal || showRoiModal) ? 'auto' : 'none',
+              overflow: (showSettings || showMesoModal || showRoiModal) ? 'auto' : 'hidden',
             }}
           >
-            {!isSelecting && !showSettings && !showMesoModal && (
+            {!isSelecting && !showSettings && !showMesoModal && !showRoiModal && (
               <>
                 {/* Section 1: 세션 시간 */}
                 <div 
@@ -1026,6 +1029,77 @@ function App() {
                       {parallelOcrTracker.stats?.mp_potions_used || 0}
                     </div>
                   </div>
+                </div>
+              </>
+            )}
+
+            {showRoiModal && (
+              <>
+                {!isSelecting && (
+                  <>
+                    {/* Draggable Title Bar for ROI */}
+                    <div
+                      onMouseDown={handleDragStart}
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        height: '40px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'move',
+                        zIndex: 999,
+                        userSelect: 'none'
+                      }}
+                    >
+                      <span style={{
+                        fontSize: '12px',
+                        fontWeight: '600',
+                        color: '#999'
+                      }}>
+                        영역 설정
+                      </span>
+                    </div>
+
+                    {/* Back Button */}
+                    <button
+                      onClick={handleCloseRoiModal}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      style={{
+                        position: 'absolute',
+                        top: '8px',
+                        left: '8px',
+                        padding: '6px 12px',
+                        fontSize: '13px',
+                        background: 'rgba(255, 255, 255, 0.95)',
+                        color: '#333',
+                        border: '1px solid rgba(0, 0, 0, 0.2)',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                        fontWeight: '600',
+                        zIndex: 1000,
+                        boxShadow: '0 2px 6px rgba(0, 0, 0, 0.1)'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = 'rgba(240, 240, 240, 1)';
+                        e.currentTarget.style.transform = 'scale(1.05)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'rgba(255, 255, 255, 0.95)';
+                        e.currentTarget.style.transform = 'scale(1)';
+                      }}
+                    >
+                      ← 뒤로
+                    </button>
+                  </>
+                )}
+
+                {/* ROI Content with Top Padding */}
+                <div style={{ paddingTop: isSelecting ? '0' : '10px', width: '100%', height: '100%', visibility: isSelecting ? 'hidden' : 'visible' }}>
+                  <CompactRoiManager onSelectingChange={handleSelectingChange} />
                 </div>
               </>
             )}
@@ -1470,13 +1544,6 @@ function App() {
           </div>
         </main>
       </div>
-      {/* ROI Configuration Modal */}
-      <RoiConfigModal
-        isOpen={showRoiModal}
-        onClose={handleCloseRoiModal}
-        onSelectingChange={handleSelectingChange}
-      />
-
       {/* Timer Settings Modal */}
       <TimerSettingsModal
         isOpen={showTimerSettings}
