@@ -115,6 +115,38 @@ impl HttpOcrClient {
         Ok(())
     }
 
+    /// Detect Level ROI by finding orange digit boxes
+    /// Returns (left, top, right, bottom) coordinates of the bounding box
+    pub fn detect_level_roi(&self, image: &DynamicImage) -> Result<(u32, u32, u32, u32), String> {
+        let matcher = self.template_matcher.as_ref()
+            .ok_or("Template matcher not initialized")?;
+
+        // Extract orange boxes
+        let mask = matcher.extract_orange_boxes(image)?;
+
+        // Find digit boxes
+        let boxes = matcher.find_digit_boxes(&mask)?;
+
+        if boxes.is_empty() {
+            return Err("No digit boxes found for ROI detection".to_string());
+        }
+
+        // Compute overall bounding box
+        let min_x = boxes.iter().map(|b| b.x).min().unwrap();
+        let min_y = boxes.iter().map(|b| b.y).min().unwrap();
+        let max_x = boxes.iter().map(|b| b.x + b.width).max().unwrap();
+        let max_y = boxes.iter().map(|b| b.y + b.height).max().unwrap();
+
+        // Add padding (20 pixels on each side)
+        let padding = 20;
+        let left = min_x.saturating_sub(padding);
+        let top = min_y.saturating_sub(padding);
+        let right = (max_x + padding).min(image.width() - 1);
+        let bottom = (max_y + padding).min(image.height() - 1);
+
+        Ok((left, top, right, bottom))
+    }
+
     /// Apply NMS-like filtering to remove overlapping boxes
     /// Keep larger boxes when IoU > threshold
     fn filter_overlapping_boxes(boxes: Vec<TextBox>, iou_threshold: f64) -> Vec<TextBox> {

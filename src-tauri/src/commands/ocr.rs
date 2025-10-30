@@ -124,28 +124,51 @@ impl OcrService {
         // Try Rust native template matching first
         if let Some(matcher) = &self.inventory_matcher {
             #[cfg(debug_assertions)]
-            println!("🔍 Using Rust native inventory recognition");
+            {
+                let t_start = std::time::Instant::now();
+                println!("🔍 Using Rust native inventory recognition (image: {}x{})", image.width(), image.height());
 
-            // Step 1: Detect inventory region (522x255) with coordinates
-            match matcher.detect_inventory_region_with_coords(image) {
-                Ok((inventory_image, _coords)) => {
-                    // Step 2: Recognize all 8 slots
-                    match matcher.recognize_all_slots(&inventory_image) {
-                        Ok(results) => {
-                            #[cfg(debug_assertions)]
-                            println!("✅ Inventory recognition successful: {:?}", results);
+                // Step 1: Detect inventory region (522x255) with coordinates
+                let t1 = std::time::Instant::now();
+                let detection_result = matcher.detect_inventory_region_with_coords(image);
+                let t2 = std::time::Instant::now();
+                println!("    ⏱️  detect_inventory_region_with_coords: {}ms", (t2 - t1).as_millis());
 
-                            return Ok(results);
-                        }
-                        Err(e) => {
-                            #[cfg(debug_assertions)]
-                            eprintln!("❌ Slot recognition failed: {}", e);
+                match detection_result {
+                    Ok((inventory_image, _coords)) => {
+                        // Step 2: Recognize all 8 slots
+                        let t3 = std::time::Instant::now();
+                        let recognition_result = matcher.recognize_all_slots(&inventory_image);
+                        let t4 = std::time::Instant::now();
+                        println!("    ⏱️  recognize_all_slots: {}ms", (t4 - t3).as_millis());
+
+                        match recognition_result {
+                            Ok(results) => {
+                                let t_end = std::time::Instant::now();
+                                println!("✅ Inventory recognition successful (total: {}ms): {:?}", (t_end - t_start).as_millis(), results);
+                                return Ok(results);
+                            }
+                            Err(e) => {
+                                eprintln!("❌ Slot recognition failed: {}", e);
+                            }
                         }
                     }
+                    Err(e) => {
+                        eprintln!("❌ Inventory region detection failed: {}", e);
+                    }
                 }
-                Err(e) => {
-                    #[cfg(debug_assertions)]
-                    eprintln!("❌ Inventory region detection failed: {}", e);
+            }
+
+            #[cfg(not(debug_assertions))]
+            {
+                // Non-debug version without timing
+                match matcher.detect_inventory_region_with_coords(image) {
+                    Ok((inventory_image, _coords)) => {
+                        if let Ok(results) = matcher.recognize_all_slots(&inventory_image) {
+                            return Ok(results);
+                        }
+                    }
+                    Err(_) => {}
                 }
             }
         } else {

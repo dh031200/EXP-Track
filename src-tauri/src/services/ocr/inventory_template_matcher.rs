@@ -335,6 +335,9 @@ impl InventoryTemplateMatcher {
 
     /// Recognize potion count in specific slot
     pub fn recognize_count_in_slot(&self, inventory_image: &DynamicImage, slot: &str) -> Result<u32, String> {
+        #[cfg(debug_assertions)]
+        let t_start = std::time::Instant::now();
+
         // Get ROI for slot
         let roi = self.slot_rois.get(slot)
             .ok_or(format!("Invalid slot: {}", slot))?;
@@ -347,10 +350,18 @@ impl InventoryTemplateMatcher {
             return Err(format!("Invalid inventory size: {}x{} (expected 522x255)", gray.width(), gray.height()));
         }
 
+        #[cfg(debug_assertions)]
+        let t_prep = std::time::Instant::now();
+
         // Detect digits in ROI
         let detections = self.detect_digits_in_roi(&gray, roi)?;
 
+        #[cfg(debug_assertions)]
+        let t_detect = std::time::Instant::now();
+
         if detections.is_empty() {
+            #[cfg(debug_assertions)]
+            println!("      📍 Slot '{}': 0 (empty, took {}ms)", slot, (t_detect - t_start).as_millis());
             return Ok(0); // Empty slot
         }
 
@@ -363,17 +374,33 @@ impl InventoryTemplateMatcher {
         let count = number_str.parse::<u32>()
             .map_err(|e| format!("Failed to parse potion count: {}", e))?;
 
+        #[cfg(debug_assertions)]
+        {
+            let t_end = std::time::Instant::now();
+            println!("      📍 Slot '{}': {} (prep: {}ms, detect: {}ms, total: {}ms)",
+                slot, count,
+                (t_prep - t_start).as_millis(),
+                (t_detect - t_prep).as_millis(),
+                (t_end - t_start).as_millis());
+        }
+
         Ok(count)
     }
 
     /// Recognize counts in all 8 inventory slots
     /// Returns HashMap with slot names as keys and item counts as values
     pub fn recognize_all_slots(&self, inventory_image: &DynamicImage) -> Result<HashMap<String, u32>, String> {
+        #[cfg(debug_assertions)]
+        let t_start = std::time::Instant::now();
+
         // Verify inventory image size
         let gray = inventory_image.to_luma8();
         if gray.width() != 522 || gray.height() != 255 {
             return Err(format!("Invalid inventory size: {}x{} (expected 522x255)", gray.width(), gray.height()));
         }
+
+        #[cfg(debug_assertions)]
+        println!("    🎰 Processing 8 inventory slots...");
 
         let mut results = HashMap::new();
         let slots = vec!["shift", "ins", "home", "pup", "ctrl", "del", "end", "pdn"];
@@ -384,11 +411,20 @@ impl InventoryTemplateMatcher {
             results.insert(slot.to_string(), count);
         }
 
+        #[cfg(debug_assertions)]
+        {
+            let t_end = std::time::Instant::now();
+            println!("    ✅ All slots processed in {}ms", (t_end - t_start).as_millis());
+        }
+
         Ok(results)
     }
 
     /// Detect all digits in ROI using multi-scale template matching
     fn detect_digits_in_roi(&self, gray: &GrayImage, roi: &SlotRoi) -> Result<Vec<DigitDetection>, String> {
+        #[cfg(debug_assertions)]
+        let t_start = std::time::Instant::now();
+
         // Extract ROI
         let roi_image = image::imageops::crop_imm(
             gray,
@@ -398,55 +434,84 @@ impl InventoryTemplateMatcher {
             roi.height,
         ).to_image();
 
+        #[cfg(debug_assertions)]
+        let t_crop = std::time::Instant::now();
+
         // Multi-scale template matching
         let scales = vec![0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3];
         let threshold = 0.7;
 
-        let mut all_detections = Vec::new();
+        // Use rayon for parallel template matching across scales
+        use rayon::prelude::*;
 
+        // Create all (template, scale) combinations for parallel processing
+        let mut combinations = Vec::new();
         for template in &self.templates {
             for &scale in &scales {
+                combinations.push((template, scale));
+            }
+        }
+
+        let all_detections: Vec<DigitDetection> = combinations.par_iter()
+            .flat_map(|(template, scale)| {
                 // Resize template
                 let (tmpl_width, tmpl_height) = template.image.dimensions();
                 let new_width = (tmpl_width as f32 * scale) as u32;
                 let new_height = (tmpl_height as f32 * scale) as u32;
 
                 if new_width < 5 || new_height < 5 {
-                    continue;
+                    return Vec::new();
                 }
                 if new_width > roi.width || new_height > roi.height {
-                    continue;
+                    return Vec::new();
                 }
 
                 let scaled_template = image::imageops::resize(
                     &template.image,
                     new_width,
                     new_height,
-                    image::imageops::FilterType::Lanczos3,
+                    image::imageops::FilterType::Lanczos3,  // High quality for accurate recognition
                 );
 
                 // Template matching
                 let matches = self.match_template(&roi_image, &scaled_template, threshold);
 
-                for (x, y, score) in matches {
-                    all_detections.push(DigitDetection {
+                matches.into_iter().map(|(x, y, score)| {
+                    DigitDetection {
                         digit: template.digit,
-                        x: x + roi.x,  // Convert to image coordinates
+                        x: x + roi.x,
                         y: y + roi.y,
                         width: new_width,
                         height: new_height,
                         score,
-                        scale,
-                    });
-                }
-            }
-        }
+                        scale: *scale,
+                    }
+                }).collect()
+            })
+            .collect();
+
+        #[cfg(debug_assertions)]
+        let t_matching_done = std::time::Instant::now();
 
         // Apply NMS to remove overlapping detections
         let filtered = self.non_maximum_suppression(all_detections, 0.05)?;
 
+        #[cfg(debug_assertions)]
+        let t_nms = std::time::Instant::now();
+
         // Filter by height consistency
         let height_filtered = self.filter_by_height(filtered, 0.2)?;
+
+        #[cfg(debug_assertions)]
+        {
+            let t_height = std::time::Instant::now();
+            println!("        🔍 detect_digits_in_roi breakdown:");
+            println!("           Crop: {}ms", (t_crop - t_start).as_millis());
+            println!("           Parallel matching (10 templates × 8 scales): {}ms", (t_matching_done - t_crop).as_millis());
+            println!("           NMS: {}ms", (t_nms - t_matching_done).as_millis());
+            println!("           Height filter: {}ms", (t_height - t_nms).as_millis());
+            println!("           Total: {}ms", (t_height - t_start).as_millis());
+        }
 
         // Remove duplicates
         let final_detections = self.remove_duplicates(height_filtered, 5)?;
