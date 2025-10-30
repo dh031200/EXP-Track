@@ -1,4 +1,4 @@
-use crate::models::config::AppConfig;
+use crate::models::config::{AppConfig, PotionConfig};
 use crate::models::roi::Roi;
 use crate::services::config::ConfigManager;
 use base64::Engine as _;
@@ -239,6 +239,37 @@ pub fn open_roi_preview(roi_type: RoiType) -> Result<(), String> {
         .arg(&file_path)
         .spawn()
         .map_err(|e| format!("Failed to open preview: {}", e))?;
+
+    Ok(())
+}
+
+/// Get potion slot configuration
+#[tauri::command]
+pub fn get_potion_slot_config(state: State<ConfigManagerState>) -> Result<PotionConfig, String> {
+    let manager = state
+        .lock()
+        .map_err(|e| format!("Failed to lock config manager: {}", e))?;
+
+    let config = manager.load()?;
+    Ok(config.potion)
+}
+
+/// Set potion slot configuration
+#[tauri::command]
+pub fn set_potion_slot_config(
+    state: State<ConfigManagerState>,
+    potion_config: PotionConfig,
+) -> Result<(), String> {
+    // Validate configuration
+    potion_config.validate()?;
+
+    let manager = state
+        .lock()
+        .map_err(|e| format!("Failed to lock config manager: {}", e))?;
+
+    let mut config = manager.load()?;
+    config.potion = potion_config;
+    manager.save(&config)?;
 
     Ok(())
 }

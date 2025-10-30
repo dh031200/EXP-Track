@@ -28,14 +28,15 @@ interface TrackingStats {
  * Hook for parallel OCR tracking with independent loops
  *
  * Features:
- * - Each OCR (Level, EXP, HP, MP) runs in its own independent loop
- * - Each OCR completes → waits 1 second → repeats
+ * - 3 parallel tasks: Level, EXP, Inventory (with automatic ROI detection)
+ * - Each OCR completes → waits 500ms → repeats
  * - Failures in one OCR don't affect others
- * - All 4 OCRs run in parallel
+ * - Inventory auto-detects region from full screen
+ * - HP/MP potions counted from inventory via slot configuration
  * - Integrates with ExpCalculator backend
  */
 export function useParallelOcrTracker() {
-  const { levelRoi, expRoi, hpRoi, mpRoi } = useRoiStore();
+  const { levelRoi, expRoi } = useRoiStore();
 
   const isTrackingRef = useRef(false);
   const sessionStartedRef = useRef(false);
@@ -53,8 +54,8 @@ export function useParallelOcrTracker() {
    * Start OCR tracking via Rust backend
    */
   const start = useCallback(async () => {
-    if (!levelRoi || !expRoi || !hpRoi || !mpRoi) {
-      console.error('All ROIs (Level, EXP, HP, MP) must be configured');
+    if (!levelRoi || !expRoi) {
+      console.error('Level and EXP ROIs must be configured');
       return;
     }
 
@@ -70,12 +71,20 @@ export function useParallelOcrTracker() {
 
     try {
       // Set up event listeners for real-time updates
-      const levelUnlisten = await listen<{ level: number }>('ocr:level-update', (event) => {
+      const levelUnlisten = await listen<{ level: number }>('ocr:level-update', async (event) => {
         console.log('⚡ [Event] Level update:', event.payload.level);
         useLevelStore.getState().setLevel({
           level: event.payload.level,
           raw_text: "",
         });
+
+        // Refresh stats to update UI display
+        try {
+          const updatedStats = await invoke<ExpStats>('get_tracking_stats');
+          setCurrentStats(updatedStats);
+        } catch (err) {
+          console.error('Failed to get updated stats after level change:', err);
+        }
       });
 
       const expUnlisten = await listen<{ exp: number; percentage: number }>('ocr:exp-update', async (event) => {
@@ -136,19 +145,17 @@ export function useParallelOcrTracker() {
 
       unlistenersRef.current = [levelUnlisten, expUnlisten, hpPotionUnlisten, mpPotionUnlisten];
 
-      // Call Rust backend to start tracking
+      // Call Rust backend to start tracking (inventory auto-detects ROI)
       await invoke('start_ocr_tracking', {
         levelRoi,
         expRoi,
-        hpRoi,
-        mpRoi,
       });
       console.log('✅ Rust OCR tracker started with event-driven updates');
     } catch (error) {
       console.error('❌ Failed to start Rust OCR tracker:', error);
       isTrackingRef.current = false;
     }
-  }, [levelRoi, expRoi, hpRoi, mpRoi]);
+  }, [levelRoi, expRoi]);
 
   /**
    * Stop OCR tracking via Rust backend

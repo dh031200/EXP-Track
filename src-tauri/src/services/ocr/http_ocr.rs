@@ -1,14 +1,17 @@
 use crate::models::ocr_result::{ExpResult, LevelResult};
+use super::template_matcher::TemplateMatcher;
 use image::DynamicImage;
 use serde::{Deserialize, Serialize};
 use base64::{Engine as _, engine::general_purpose};
 use regex::Regex;
+use std::sync::Arc;
 
 /// HTTP OCR client that communicates with Python FastAPI server
 #[derive(Clone)]
 pub struct HttpOcrClient {
     client: reqwest::Client,
     base_url: String,
+    template_matcher: Option<Arc<TemplateMatcher>>,
 }
 
 #[derive(Serialize)]
@@ -98,7 +101,50 @@ impl HttpOcrClient {
         Ok(Self {
             client,
             base_url: "http://127.0.0.1:39835".to_string(),
+            template_matcher: None,
         })
+    }
+
+    /// Initialize template matcher with resource directory
+    pub fn init_template_matcher(&mut self, template_dir: &str) -> Result<(), String> {
+        let mut matcher = TemplateMatcher::new();
+        matcher.load_templates(template_dir)
+            .map_err(|e| format!("Failed to load templates: {}", e))?;
+
+        self.template_matcher = Some(Arc::new(matcher));
+        Ok(())
+    }
+
+    /// Detect Level ROI by finding orange digit boxes
+    /// Returns (left, top, right, bottom) coordinates of the bounding box
+    pub fn detect_level_roi(&self, image: &DynamicImage) -> Result<(u32, u32, u32, u32), String> {
+        let matcher = self.template_matcher.as_ref()
+            .ok_or("Template matcher not initialized")?;
+
+        // Extract orange boxes
+        let mask = matcher.extract_orange_boxes(image)?;
+
+        // Find digit boxes
+        let boxes = matcher.find_digit_boxes(&mask)?;
+
+        if boxes.is_empty() {
+            return Err("No digit boxes found for ROI detection".to_string());
+        }
+
+        // Compute overall bounding box
+        let min_x = boxes.iter().map(|b| b.x).min().unwrap();
+        let min_y = boxes.iter().map(|b| b.y).min().unwrap();
+        let max_x = boxes.iter().map(|b| b.x + b.width).max().unwrap();
+        let max_y = boxes.iter().map(|b| b.y + b.height).max().unwrap();
+
+        // Add padding (20 pixels on each side)
+        let padding = 20;
+        let left = min_x.saturating_sub(padding);
+        let top = min_y.saturating_sub(padding);
+        let right = (max_x + padding).min(image.width() - 1);
+        let bottom = (max_y + padding).min(image.height() - 1);
+
+        Ok((left, top, right, bottom))
     }
 
     /// Apply NMS-like filtering to remove overlapping boxes
@@ -260,8 +306,34 @@ impl HttpOcrClient {
             .map_err(|e| format!("Failed to parse MP potion count '{}': {}", digits, e))
     }
 
-    /// Recognize level from image
+    /// Recognize level from image using template matching (with RapidOCR fallback)
     pub async fn recognize_level(&self, image: &DynamicImage) -> Result<LevelResult, String> {
+        // Try template matching first if available
+        if let Some(matcher) = &self.template_matcher {
+            let matcher = Arc::clone(matcher);
+            let image = image.clone();
+            
+            // Run blocking template matching in dedicated thread pool
+            let result = tokio::task::spawn_blocking(move || {
+                matcher.recognize_level(&image)
+            }).await.map_err(|e| format!("Template matching task failed: {}", e))?;
+            
+            match result {
+                Ok(level) => {
+                    println!("⚡ Level {} recognized via template matching", level);
+                    return Ok(LevelResult {
+                        level,
+                        raw_text: format!("LV. {}", level),
+                    });
+                }
+                Err(e) => {
+                    println!("⚠️  Template matching failed: {}, falling back to RapidOCR", e);
+                }
+            }
+        }
+
+        // Fall back to RapidOCR
+        println!("🔄 Using RapidOCR for level recognition");
         let text = self.recognize_text(image).await?;
         let level = Self::parse_level(&text)?;
 
