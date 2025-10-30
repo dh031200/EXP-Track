@@ -24,19 +24,17 @@ export interface TrackingStats {
 }
 
 /**
- * Start OCR tracking with 4 parallel tasks in Rust backend
+ * Start OCR tracking with 3 parallel tasks (Level, EXP, Inventory with auto ROI)
+ * Inventory region is automatically detected from full screen
+ * Potion slot mapping is configured via settings
  */
 export async function startOcrTracking(
   levelRoi: Roi,
-  expRoi: Roi,
-  hpRoi: Roi,
-  mpRoi: Roi
+  expRoi: Roi
 ): Promise<void> {
   await invoke('start_ocr_tracking', {
     levelRoi,
     expRoi,
-    hpRoi,
-    mpRoi,
   });
 }
 

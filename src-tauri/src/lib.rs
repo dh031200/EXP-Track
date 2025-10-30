@@ -9,6 +9,7 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use commands::config::{
     clear_roi, get_all_rois, get_config_path, init_config_manager, load_config, load_roi,
     get_roi_preview, open_roi_preview, save_config, save_roi, save_roi_preview,
+    get_potion_slot_config, set_potion_slot_config,
 };
 use commands::ocr::{
     init_ocr_service, recognize_all_parallel, recognize_exp, recognize_hp_potion_count, recognize_level,
@@ -151,6 +152,8 @@ pub fn run() {
             save_config,
             load_config,
             get_config_path,
+            get_potion_slot_config,
+            set_potion_slot_config,
             save_roi_preview,
             get_roi_preview,
             open_roi_preview,

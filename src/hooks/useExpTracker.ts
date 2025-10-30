@@ -30,12 +30,13 @@ export interface UseExpTrackerReturn {
 /**
  * Simplified hook for EXP tracking with Rust-managed state
  *
- * - All OCR processing happens in Rust (4 parallel tokio tasks)
+ * - All OCR processing happens in Rust (3 parallel tokio tasks: Level, EXP, Inventory)
+ * - Inventory uses automatic ROI detection from full screen
  * - Frontend polls stats every 500ms
  * - No complex state management in frontend
  */
 export function useExpTracker(): UseExpTrackerReturn {
-  const { levelRoi, expRoi, hpRoi, mpRoi } = useRoiStore();
+  const { levelRoi, expRoi } = useRoiStore();
 
   const [state, setState] = useState<ExpTrackerState>({
     stats: null,
@@ -70,14 +71,14 @@ export function useExpTracker(): UseExpTrackerReturn {
    * Start tracking and polling
    */
   const start = useCallback(async () => {
-    if (!levelRoi || !expRoi || !hpRoi || !mpRoi) {
-      setState(prev => ({ ...prev, error: 'All ROIs must be configured' }));
+    if (!levelRoi || !expRoi) {
+      setState(prev => ({ ...prev, error: 'Level and EXP ROIs must be configured' }));
       return;
     }
 
     try {
-      // Start Rust-side OCR tracking
-      await startOcrTracking(levelRoi, expRoi, hpRoi, mpRoi);
+      // Start Rust-side OCR tracking (inventory auto-detects ROI)
+      await startOcrTracking(levelRoi, expRoi);
 
       isTrackingRef.current = true;
       setState(prev => ({ ...prev, isTracking: true, error: null }));
@@ -85,13 +86,13 @@ export function useExpTracker(): UseExpTrackerReturn {
       // Start polling stats every 500ms
       pollingIntervalRef.current = window.setInterval(pollStats, 500);
 
-      console.log('✅ Tracking started with Rust backend');
+      console.log('✅ Tracking started with Rust backend (auto inventory ROI)');
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       console.error('❌ Failed to start tracking:', errorMsg);
       setState(prev => ({ ...prev, error: errorMsg }));
     }
-  }, [levelRoi, expRoi, hpRoi, mpRoi, pollStats]);
+  }, [levelRoi, expRoi, pollStats]);
 
   /**
    * Stop tracking and polling

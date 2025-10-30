@@ -278,7 +278,15 @@ impl HttpOcrClient {
     pub async fn recognize_level(&self, image: &DynamicImage) -> Result<LevelResult, String> {
         // Try template matching first if available
         if let Some(matcher) = &self.template_matcher {
-            match matcher.recognize_level(image) {
+            let matcher = Arc::clone(matcher);
+            let image = image.clone();
+            
+            // Run blocking template matching in dedicated thread pool
+            let result = tokio::task::spawn_blocking(move || {
+                matcher.recognize_level(&image)
+            }).await.map_err(|e| format!("Template matching task failed: {}", e))?;
+            
+            match result {
                 Ok(level) => {
                     println!("⚡ Level {} recognized via template matching", level);
                     return Ok(LevelResult {

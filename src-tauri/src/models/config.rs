@@ -199,6 +199,43 @@ impl Default for AdvancedConfig {
     }
 }
 
+/// Potion slot configuration
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PotionConfig {
+    pub hp_potion_slot: String,
+    pub mp_potion_slot: String,
+}
+
+impl Default for PotionConfig {
+    fn default() -> Self {
+        Self {
+            hp_potion_slot: "shift".to_string(),
+            mp_potion_slot: "ins".to_string(),
+        }
+    }
+}
+
+impl PotionConfig {
+    /// Validate that slots are different and valid
+    pub fn validate(&self) -> Result<(), String> {
+        const VALID_SLOTS: &[&str] = &["shift", "ins", "home", "pup", "ctrl", "del", "end", "pdn"];
+
+        if !VALID_SLOTS.contains(&self.hp_potion_slot.as_str()) {
+            return Err(format!("Invalid HP potion slot: {}", self.hp_potion_slot));
+        }
+
+        if !VALID_SLOTS.contains(&self.mp_potion_slot.as_str()) {
+            return Err(format!("Invalid MP potion slot: {}", self.mp_potion_slot));
+        }
+
+        if self.hp_potion_slot == self.mp_potion_slot {
+            return Err("HP and MP potion slots must be different".to_string());
+        }
+
+        Ok(())
+    }
+}
+
 /// Complete application configuration
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct AppConfig {
@@ -208,6 +245,8 @@ pub struct AppConfig {
     pub display: DisplayConfig,
     pub audio: AudioConfig,
     pub advanced: AdvancedConfig,
+    #[serde(default)]
+    pub potion: PotionConfig,
 }
 
 #[cfg(test)]

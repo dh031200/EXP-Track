@@ -1,9 +1,10 @@
 use crate::models::ocr_result::{CombinedOcrResult, ExpResult, LevelResult, MapResult};
-use crate::services::ocr::HttpOcrClient;
+use crate::services::ocr::{HttpOcrClient, InventoryTemplateMatcher};
 use base64::Engine as _;
 use image::DynamicImage;
 use parking_lot::Mutex;
 use std::sync::Arc;
+use std::collections::HashMap;
 use tauri::State;
 
 /// State wrapper for OCR service (Arc for async sharing, parking_lot::Mutex for performance)
@@ -12,6 +13,7 @@ pub type OcrServiceState = Arc<Mutex<OcrService>>;
 /// OCR service using HTTP client to communicate with Python server
 pub struct OcrService {
     pub http_client: HttpOcrClient,  // Public for cloning in async tasks
+    pub inventory_matcher: Option<Arc<InventoryTemplateMatcher>>,  // Rust native inventory recognition
 }
 
 impl OcrService {
@@ -20,11 +22,15 @@ impl OcrService {
         println!("🔧 Initializing OCR Service...");
         let mut http_client = HttpOcrClient::new()?;
 
-        // Try to initialize template matcher (non-fatal if it fails)
+        // Try to initialize level template matcher (non-fatal if it fails)
         Self::try_init_template_matcher(&mut http_client).ok();
+
+        // Try to initialize inventory template matcher (Rust native)
+        let inventory_matcher = Self::try_init_inventory_matcher().ok();
 
         Ok(Self {
             http_client,
+            inventory_matcher,
         })
     }
 
@@ -45,6 +51,45 @@ impl OcrService {
         }
 
         Err("Template directory not found in any expected location".to_string())
+    }
+
+    /// Try to initialize inventory template matcher (Rust native)
+    fn try_init_inventory_matcher() -> Result<Arc<InventoryTemplateMatcher>, String> {
+        println!("🔧 Initializing Inventory Template Matcher (Rust native)...");
+
+        // Try multiple possible template paths for inventory digit templates
+        let possible_paths = vec![
+            "src-tauri/resources/item_template",   // Development (from project root)
+            "resources/item_template",             // Development (from src-tauri)
+            "../Resources/item_template",          // macOS bundled
+            "./resources/item_template",           // Windows/Linux bundled
+        ];
+
+        let mut matcher = InventoryTemplateMatcher::new();
+
+        for path in possible_paths.iter() {
+            #[cfg(debug_assertions)]
+            println!("🔍 Trying inventory template path: {}", path);
+
+            if std::path::Path::new(path).exists() {
+                println!("📂 Loading inventory templates from: {}", path);
+                match matcher.load_templates(path) {
+                    Ok(_) => {
+                        println!("✅ Inventory template matcher initialized successfully");
+                        return Ok(Arc::new(matcher));
+                    }
+                    Err(e) => {
+                        eprintln!("❌ Failed to load templates from {}: {}", path, e);
+                        continue;
+                    }
+                }
+            } else {
+                #[cfg(debug_assertions)]
+                println!("❌ Path does not exist: {}", path);
+            }
+        }
+
+        Err("Inventory template directory not found in any expected location".to_string())
     }
 
     /// Recognize and parse level from image
@@ -71,6 +116,52 @@ impl OcrService {
     /// Recognize MP potion count from inventory image (numbers only)
     pub async fn recognize_mp_potion_count(&self, image: &DynamicImage) -> Result<u32, String> {
         self.http_client.recognize_mp_potion_count(image).await
+    }
+
+    /// Recognize all 8 inventory slots (Rust native implementation)
+    /// Returns HashMap with slot names as keys and item counts as values
+    pub fn recognize_inventory(&self, image: &DynamicImage) -> Result<HashMap<String, u32>, String> {
+        // Try Rust native template matching first
+        if let Some(matcher) = &self.inventory_matcher {
+            #[cfg(debug_assertions)]
+            println!("🔍 Using Rust native inventory recognition");
+
+            // Step 1: Detect inventory region (522x255) with coordinates
+            match matcher.detect_inventory_region_with_coords(image) {
+                Ok((inventory_image, _coords)) => {
+                    // Step 2: Recognize all 8 slots
+                    match matcher.recognize_all_slots(&inventory_image) {
+                        Ok(results) => {
+                            #[cfg(debug_assertions)]
+                            println!("✅ Inventory recognition successful: {:?}", results);
+
+                            return Ok(results);
+                        }
+                        Err(e) => {
+                            #[cfg(debug_assertions)]
+                            eprintln!("❌ Slot recognition failed: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    #[cfg(debug_assertions)]
+                    eprintln!("❌ Inventory region detection failed: {}", e);
+                }
+            }
+        } else {
+            #[cfg(debug_assertions)]
+            println!("⚠️  Inventory matcher not initialized");
+        }
+
+        // Fallback: Return empty inventory (Python HTTP fallback can be added later if needed)
+        #[cfg(debug_assertions)]
+        println!("⚠️  Falling back to empty inventory");
+
+        let mut empty = HashMap::new();
+        for slot in &["shift", "ins", "home", "pup", "ctrl", "del", "end", "pdn"] {
+            empty.insert(slot.to_string(), 0);
+        }
+        Ok(empty)
     }
 
     /// Check if OCR server is healthy

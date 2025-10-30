@@ -3,14 +3,12 @@ import { persist } from 'zustand/middleware';
 import type { Roi } from '../lib/tauri';
 import { saveRoi, loadRoi, clearRoi } from '../lib/roiCommands';
 
-export type RoiType = 'level' | 'exp' | 'hp' | 'mp'; // | 'mapLocation' - commented out temporarily
+export type RoiType = 'level' | 'exp'; // | 'mapLocation' - commented out temporarily
 
 interface RoiState {
   // Current ROI configurations
   levelRoi: Roi | null;
   expRoi: Roi | null;
-  hpRoi: Roi | null;
-  mpRoi: Roi | null;
   // mapLocationRoi: Roi | null; // Commented out temporarily
 
   // Loading states
@@ -31,8 +29,6 @@ export const useRoiStore = create<RoiState>()(
       // Initial state
       levelRoi: null,
       expRoi: null,
-      hpRoi: null,
-      mpRoi: null,
       // mapLocationRoi: null, // Commented out temporarily
       isLoading: false,
       error: null,
@@ -51,12 +47,6 @@ export const useRoiStore = create<RoiState>()(
               break;
             case 'exp':
               set({ expRoi: roi, isLoading: false });
-              break;
-            case 'hp':
-              set({ hpRoi: roi, isLoading: false });
-              break;
-            case 'mp':
-              set({ mpRoi: roi, isLoading: false });
               break;
             // case 'mapLocation': // Commented out temporarily
             //   set({ mapLocationRoi: roi, isLoading: false });
@@ -77,10 +67,6 @@ export const useRoiStore = create<RoiState>()(
             return state.levelRoi;
           case 'exp':
             return state.expRoi;
-          case 'hp':
-            return state.hpRoi;
-          case 'mp':
-            return state.mpRoi;
           // case 'mapLocation': // Commented out temporarily
           //   return state.mapLocationRoi;
         }
@@ -101,12 +87,6 @@ export const useRoiStore = create<RoiState>()(
             case 'exp':
               set({ expRoi: null, isLoading: false });
               break;
-            case 'hp':
-              set({ hpRoi: null, isLoading: false });
-              break;
-            case 'mp':
-              set({ mpRoi: null, isLoading: false });
-              break;
             // case 'mapLocation': // Commented out temporarily
             //   set({ mapLocationRoi: null, isLoading: false });
             //   break;
@@ -122,19 +102,15 @@ export const useRoiStore = create<RoiState>()(
       loadAllRois: async () => {
         set({ isLoading: true, error: null });
         try {
-          const [levelRoi, expRoi, hpRoi, mpRoi] = await Promise.all([
+          const [levelRoi, expRoi] = await Promise.all([
             loadRoi('level'),
             loadRoi('exp'),
-            loadRoi('hp'),
-            loadRoi('mp'),
             // loadRoi('mapLocation'), // Commented out temporarily
           ]);
 
           set({
             levelRoi,
             expRoi,
-            hpRoi,
-            mpRoi,
             // mapLocationRoi, // Commented out temporarily
             isLoading: false,
           });
@@ -154,8 +130,6 @@ export const useRoiStore = create<RoiState>()(
       partialize: (state) => ({
         levelRoi: state.levelRoi,
         expRoi: state.expRoi,
-        hpRoi: state.hpRoi,
-        mpRoi: state.mpRoi,
         // mapLocationRoi: state.mapLocationRoi, // Commented out temporarily
       }),
     }

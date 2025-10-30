@@ -1,14 +1,16 @@
 use crate::commands::ocr::OcrServiceState;
 use crate::models::exp_data::ExpData;
 use crate::models::roi::Roi;
+use crate::models::config::PotionConfig;
 use crate::services::exp_calculator::ExpCalculator;
 use crate::services::hp_potion_calculator::HpPotionCalculator;
 use crate::services::mp_potion_calculator::MpPotionCalculator;
 use crate::services::screen_capture::ScreenCapture;
+use crate::services::config::ConfigManager;
 use serde::Serialize;
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 use tokio::time::sleep;
 
@@ -97,29 +99,28 @@ impl TrackerState {
         })
     }
 
-    /// Update level with stability check (needs 2 consecutive matches)
-    fn update_level(&mut self, new_level: u32) {
-        if let Some(prev) = self.prev_level {
-            if prev == new_level {
+    /// Update level - emit immediately for UI responsiveness
+    fn update_level(&mut self, new_level: u32) -> bool {
+        let should_emit = match self.prev_level {
+            Some(prev) if prev == new_level => {
+                // Same as before - already displayed in UI, no need to re-emit
                 self.level_match_count += 1;
-                if self.level_match_count >= 2 {
-                    // Stable - update confirmed level
-                    self.level = Some(new_level);
-                }
-            } else {
-                // Different value - reset counter
+                false
+            }
+            _ => {
+                // New value - emit immediately to UI
                 self.prev_level = Some(new_level);
                 self.level_match_count = 1;
+                self.level = Some(new_level);
+                true
             }
-        } else {
-            // First reading
-            self.prev_level = Some(new_level);
-            self.level_match_count = 1;
-        }
+        };
+        should_emit
     }
 
-    /// Update EXP and trigger calculator update
-    fn update_exp_data(&mut self, exp: u64, percentage: f64) {
+    /// Update EXP and trigger calculator update - returns true if changed
+    fn update_exp_data(&mut self, exp: u64, percentage: f64) -> bool {
+        let changed = self.exp != Some(exp) || self.percentage != Some(percentage);
         self.exp = Some(exp);
         self.percentage = Some(percentage);
 
@@ -160,6 +161,7 @@ impl TrackerState {
                 }
             }
         }
+        changed
     }
 
     fn to_stats(&self) -> TrackingStats {
@@ -230,13 +232,12 @@ impl OcrTracker {
         })
     }
 
-    /// Start OCR tracking with 4 independent parallel tasks
+    /// Start OCR tracking with 3 independent parallel tasks (Level, EXP, Inventory)
+    /// Inventory recognition uses automatic ROI detection
     pub async fn start_tracking(
         &self,
         level_roi: Roi,
         exp_roi: Roi,
-        hp_roi: Roi,
-        mp_roi: Roi,
     ) -> Result<(), String> {
         // Check if already tracking - prevent reinitialization
         let state = self.state.lock().await;
@@ -256,15 +257,13 @@ impl OcrTracker {
         state.is_tracking = true;
         drop(state);
 
-        // Spawn 4 independent OCR tasks + health check
-        self.spawn_level_loop(level_roi, self.app.clone());
+        // Spawn OCR tasks: combined Level+Inventory (shared capture), separate EXP, health check
+        self.spawn_combined_level_inventory_loop(level_roi, self.app.clone());
         self.spawn_exp_loop(exp_roi, self.app.clone());
-        self.spawn_hp_potion_loop(hp_roi, self.app.clone());
-        self.spawn_mp_potion_loop(mp_roi, self.app.clone());
         self.spawn_health_check_loop(self.app.clone());
 
         #[cfg(debug_assertions)]
-        println!("🚀 OCR Tracker started with 4 OCR tasks + health monitor");
+        println!("🚀 OCR Tracker started with 3 OCR tasks (Level, EXP, Inventory) + health monitor");
         Ok(())
     }
 
@@ -291,6 +290,191 @@ impl OcrTracker {
         #[cfg(debug_assertions)]
         println!("🔄 OCR Tracker reset");
         Ok(())
+    }
+
+    /// Combined Level + Inventory OCR loop (shares full screen capture for efficiency)
+    fn spawn_combined_level_inventory_loop(&self, _roi: Roi, app: AppHandle) {
+        let state = Arc::clone(&self.state);
+        let stop_signal = Arc::clone(&self.stop_signal);
+        let screen_capture = Arc::clone(&self.screen_capture);
+        let ocr_service = Arc::clone(&self.ocr_service);
+
+        tokio::spawn(async move {
+            #[cfg(debug_assertions)]
+            println!("🚀 Combined LEVEL + INVENTORY OCR task started (shared capture)");
+
+            // Image cache for duplicate detection
+            let mut last_image_bytes: Option<Vec<u8>> = None;
+
+            while !*stop_signal.lock().await {
+                let start = std::time::Instant::now();
+
+                // Single full screen capture for both Level and Inventory
+                match screen_capture.capture_full() {
+                    Ok(image) => {
+                        // Convert image to raw bytes for comparison
+                        let current_bytes = image.as_bytes().to_vec();
+
+                        // Check if image is identical to last capture
+                        if let Some(ref last_bytes) = last_image_bytes {
+                            if current_bytes == *last_bytes {
+                                #[cfg(debug_assertions)]
+                                println!("⏭️  Level+Inventory: Skipped (identical image)");
+                                sleep(Duration::from_millis(500)).await;
+                                continue;
+                            }
+                        }
+
+                        // Process Level and Inventory independently (not waiting for each other)
+                        // Share captured image via Arc to avoid cloning full image
+                        let image = Arc::new(image);
+
+                        // Spawn Level OCR as independent task
+                        {
+                            let http_client = {
+                                let service = ocr_service.lock();
+                                service.http_client.clone()
+                            };
+                            let image = Arc::clone(&image);
+                            let app = app.clone();
+                            let state = Arc::clone(&state);
+                            let start = start.clone();
+
+                            tokio::spawn(async move {
+                                match http_client.recognize_level(&*image).await {
+                                    Ok(result) => {
+                                        let should_emit = {
+                                            let mut state = state.lock().await;
+                                            state.update_level(result.level)
+                                        };
+
+                                        // Emit event to Frontend if level changed
+                                        if should_emit {
+                                            #[cfg(debug_assertions)]
+                                            println!("📤 Emitting level update event: {}", result.level);
+                                            if let Err(e) = app.emit("ocr:level-update", LevelUpdate { level: result.level }) {
+                                                eprintln!("❌ Failed to emit level update event: {}", e);
+                                            }
+                                        } else {
+                                            #[cfg(debug_assertions)]
+                                            println!("⏭️  Level {} unchanged, skipping emit", result.level);
+                                        }
+
+                                        #[cfg(debug_assertions)]
+                                        {
+                                            let elapsed = start.elapsed().as_millis();
+                                            println!("✅ LEVEL OCR: {} ({}ms)", result.level, elapsed);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        #[cfg(debug_assertions)]
+                                        eprintln!("❌ LEVEL OCR failed: {}", e);
+                                    }
+                                }
+                            });
+                        }
+
+                        // Spawn Inventory OCR as independent task
+                        {
+                            let ocr_service_clone = Arc::clone(&ocr_service);
+                            let image = Arc::clone(&image);
+                            let app = app.clone();
+                            let state = Arc::clone(&state);
+                            let start = start.clone();
+
+                            tokio::spawn(async move {
+                                let inventory_result = tokio::task::spawn_blocking(move || {
+                                    let service = ocr_service_clone.lock();
+                                    service.recognize_inventory(&*image)
+                                }).await;
+
+                                match inventory_result {
+                                    Ok(Ok(inventory)) => {
+                                        // Load potion config from app state
+                                        let potion_config = {
+                                            if let Some(config_state) = app.try_state::<std::sync::Mutex<ConfigManager>>() {
+                                                match config_state.lock() {
+                                                    Ok(manager) => match manager.load() {
+                                                        Ok(config) => config.potion,
+                                                        Err(_) => PotionConfig::default()
+                                                    },
+                                                    Err(_) => PotionConfig::default()
+                                                }
+                                            } else {
+                                                PotionConfig::default()
+                                            }
+                                        };
+
+                                        // Extract HP and MP counts from inventory
+                                        let hp_potion_count = *inventory.get(&potion_config.hp_potion_slot).unwrap_or(&0);
+                                        let mp_potion_count = *inventory.get(&potion_config.mp_potion_slot).unwrap_or(&0);
+
+                                        // Update state and calculators
+                                        let mut state = state.lock().await;
+                                        state.hp_potion_count = Some(hp_potion_count);
+                                        state.mp_potion_count = Some(mp_potion_count);
+
+                                        // Update HP calculator
+                                        let (hp_used, hp_per_min) = state.hp_calculator.update(hp_potion_count);
+                                        state.latest_stats.hp_potions_used = hp_used as i32;
+                                        state.latest_stats.hp_potions_per_minute = hp_per_min;
+
+                                        // Update MP calculator
+                                        let (mp_used, mp_per_min) = state.mp_calculator.update(mp_potion_count);
+                                        state.latest_stats.mp_potions_used = mp_used as i32;
+                                        state.latest_stats.mp_potions_per_minute = mp_per_min;
+
+                                        drop(state);
+
+                                        // Emit events to Frontend
+                                        #[cfg(debug_assertions)]
+                                        println!("📤 Emitting HP potion update event: {}", hp_potion_count);
+                                        if let Err(e) = app.emit("ocr:hp-potion-update", HpPotionUpdate { hp_potion_count }) {
+                                            eprintln!("❌ Failed to emit HP potion update event: {}", e);
+                                        }
+
+                                        #[cfg(debug_assertions)]
+                                        println!("📤 Emitting MP potion update event: {}", mp_potion_count);
+                                        if let Err(e) = app.emit("ocr:mp-potion-update", MpPotionUpdate { mp_potion_count }) {
+                                            eprintln!("❌ Failed to emit MP potion update event: {}", e);
+                                        }
+
+                                        #[cfg(debug_assertions)]
+                                        {
+                                            let elapsed = start.elapsed().as_millis();
+                                            println!("✅ Inventory OCR: HP={} ({}), MP={} ({}) - {}ms",
+                                                hp_potion_count, potion_config.hp_potion_slot,
+                                                mp_potion_count, potion_config.mp_potion_slot,
+                                                elapsed);
+                                        }
+                                    }
+                                    Ok(Err(e)) => {
+                                        #[cfg(debug_assertions)]
+                                        eprintln!("❌ Inventory OCR failed: {}", e);
+                                    }
+                                    Err(e) => {
+                                        #[cfg(debug_assertions)]
+                                        eprintln!("❌ Inventory recognition task failed: {}", e);
+                                    }
+                                }
+                            });
+                        }
+
+                        // Update cache
+                        last_image_bytes = Some(current_bytes);
+                    }
+                    Err(e) => {
+                        #[cfg(debug_assertions)]
+                        eprintln!("❌ Full screen capture failed: {}", e);
+                    }
+                }
+
+                sleep(Duration::from_millis(500)).await;
+            }
+
+            #[cfg(debug_assertions)]
+            println!("⏹️  Combined Level+Inventory OCR task stopped");
+        });
     }
 
     // Independent Level OCR loop with shared OCR service + image caching
@@ -411,14 +595,25 @@ impl OcrTracker {
                         };
                         match http_client.recognize_exp(&image).await {
                             Ok(result) => {
-                                let mut state_guard = state.lock().await;
-                                state_guard.update_exp_data(result.absolute, result.percentage);
+                                let should_emit = {
+                                    let mut state_guard = state.lock().await;
+                                    state_guard.update_exp_data(result.absolute, result.percentage)
+                                };
 
-                                // Emit event to Frontend immediately
-                                app.emit("ocr:exp-update", ExpUpdate {
-                                    exp: result.absolute,
-                                    percentage: result.percentage
-                                }).ok();
+                                // Emit event to Frontend if EXP changed
+                                if should_emit {
+                                    #[cfg(debug_assertions)]
+                                    println!("📤 Emitting EXP update event: {} [{}%]", result.absolute, result.percentage);
+                                    if let Err(e) = app.emit("ocr:exp-update", ExpUpdate {
+                                        exp: result.absolute,
+                                        percentage: result.percentage
+                                    }) {
+                                        eprintln!("❌ Failed to emit EXP update event: {}", e);
+                                    }
+                                } else {
+                                    #[cfg(debug_assertions)]
+                                    println!("⏭️  EXP unchanged, skipping emit");
+                                }
 
                                 #[cfg(debug_assertions)]
                                 {
@@ -452,16 +647,16 @@ impl OcrTracker {
         });
     }
 
-    // Independent HP Potion OCR loop with shared OCR service + image caching
-    fn spawn_hp_potion_loop(&self, roi: Roi, app: AppHandle) {
+    // Unified Inventory OCR loop - Rust native with automatic ROI detection
+    fn spawn_inventory_loop(&self, app: AppHandle) {
         let state = Arc::clone(&self.state);
         let stop_signal = Arc::clone(&self.stop_signal);
         let screen_capture = Arc::clone(&self.screen_capture);
-        let ocr_service = Arc::clone(&self.ocr_service);  // Use shared service
+        let ocr_service = Arc::clone(&self.ocr_service);
 
         tokio::spawn(async move {
             #[cfg(debug_assertions)]
-            println!("🚀 HP Potion OCR task started - using shared OCR service");
+            println!("🚀 Inventory OCR task started - Rust native with auto ROI");
 
             // Image cache for duplicate detection
             let mut last_image_bytes: Option<Vec<u8>> = None;
@@ -469,7 +664,8 @@ impl OcrTracker {
             while !*stop_signal.lock().await {
                 let start = std::time::Instant::now();
 
-                match screen_capture.capture_region(&roi) {
+                // Capture full screen for automatic inventory detection
+                match screen_capture.capture_full() {
                     Ok(image) => {
                         // Convert image to raw bytes for comparison
                         let current_bytes = image.as_bytes().to_vec();
@@ -478,130 +674,77 @@ impl OcrTracker {
                         if let Some(ref last_bytes) = last_image_bytes {
                             if current_bytes == *last_bytes {
                                 #[cfg(debug_assertions)]
-                                println!("⏭️  HP Potion: Skipped (identical image)");
+                                println!("⏭️  Inventory: Skipped (identical image)");
                                 sleep(Duration::from_millis(500)).await;
                                 continue;
                             }
                         }
 
-                        // Image changed - run OCR
-                        let http_client = {
-                            let service = ocr_service.lock();
-                            service.http_client.clone()
+                        // Run Rust native inventory recognition (async, non-blocking)
+                        let ocr_service_clone = Arc::clone(&ocr_service);
+                        let image_clone = image.clone();
+                        let inventory_results = match tokio::task::spawn_blocking(move || {
+                            let service = ocr_service_clone.lock();
+                            service.recognize_inventory(&image_clone)
+                        }).await {
+                            Ok(result) => result,
+                            Err(e) => Err(format!("Inventory recognition task failed: {}", e))
                         };
-                        match http_client.recognize_hp_potion_count(&image).await {
-                            Ok(hp_potion_count) => {
+
+                        match inventory_results {
+                            Ok(inventory) => {
+                                // Load potion config from app state
+                                let potion_config = {
+                    if let Some(config_state) = app.try_state::<std::sync::Mutex<ConfigManager>>() {
+                        match config_state.lock() {
+                            Ok(manager) => match manager.load() {
+                                Ok(config) => config.potion,
+                                Err(_) => PotionConfig::default()
+                            },
+                            Err(_) => PotionConfig::default()
+                        }
+                    } else {
+                        PotionConfig::default()
+                    }
+                };
+
+                                // Extract HP and MP counts from inventory
+                                let hp_potion_count = *inventory.get(&potion_config.hp_potion_slot).unwrap_or(&0);
+                                let mp_potion_count = *inventory.get(&potion_config.mp_potion_slot).unwrap_or(&0);
+
+                                // Update state and calculators
                                 let mut state = state.lock().await;
                                 state.hp_potion_count = Some(hp_potion_count);
+                                state.mp_potion_count = Some(mp_potion_count);
 
-                                // Update HP potion count - INDEPENDENT CALCULATOR
+                                // Update HP calculator
                                 let (hp_used, hp_per_min) = state.hp_calculator.update(hp_potion_count);
-
-                                // Cache HP potion stats
                                 state.latest_stats.hp_potions_used = hp_used as i32;
                                 state.latest_stats.hp_potions_per_minute = hp_per_min;
 
-                                #[cfg(debug_assertions)]
-                                println!("🧪 HP Potion: used={}, per_min={:.2}",
-                                    hp_used, hp_per_min);
-
-                                // Emit event to Frontend immediately
-                                app.emit("ocr:hp-potion-update", HpPotionUpdate { hp_potion_count }).ok();
-
-                                #[cfg(debug_assertions)]
-                                {
-                                    let elapsed = start.elapsed().as_millis();
-                                    println!("✅ HP Potion OCR: {} ({}ms)", hp_potion_count, elapsed);
-                                }
-                            }
-                            Err(e) => {
-                                #[cfg(debug_assertions)]
-                                eprintln!("❌ HP Potion OCR failed: {}", e);
-                            }
-                        }
-
-                        // Update cache
-                        last_image_bytes = Some(current_bytes);
-                    }
-                    Err(e) => {
-                        #[cfg(debug_assertions)]
-                        eprintln!("❌ HP Potion capture failed: {}", e);
-                    }
-                }
-
-                sleep(Duration::from_millis(500)).await;
-            }
-
-            #[cfg(debug_assertions)]
-            println!("⏹️  HP Potion OCR task stopped");
-        });
-    }
-
-    // Independent MP Potion OCR loop with shared OCR service + image caching
-    fn spawn_mp_potion_loop(&self, roi: Roi, app: AppHandle) {
-        let state = Arc::clone(&self.state);
-        let stop_signal = Arc::clone(&self.stop_signal);
-        let screen_capture = Arc::clone(&self.screen_capture);
-        let ocr_service = Arc::clone(&self.ocr_service);  // Use shared service
-
-        tokio::spawn(async move {
-            #[cfg(debug_assertions)]
-            println!("🚀 MP Potion OCR task started - using shared OCR service");
-
-            // Image cache for duplicate detection
-            let mut last_image_bytes: Option<Vec<u8>> = None;
-
-            while !*stop_signal.lock().await {
-                let start = std::time::Instant::now();
-
-                match screen_capture.capture_region(&roi) {
-                    Ok(image) => {
-                        // Convert image to raw bytes for comparison
-                        let current_bytes = image.as_bytes().to_vec();
-
-                        // Check if image is identical to last capture
-                        if let Some(ref last_bytes) = last_image_bytes {
-                            if current_bytes == *last_bytes {
-                                #[cfg(debug_assertions)]
-                                println!("⏭️  MP Potion: Skipped (identical image)");
-                                sleep(Duration::from_millis(500)).await;
-                                continue;
-                            }
-                        }
-
-                        // Image changed - run OCR
-                        let http_client = {
-                            let service = ocr_service.lock();
-                            service.http_client.clone()
-                        };
-                        match http_client.recognize_mp_potion_count(&image).await {
-                            Ok(mp_potion_count) => {
-                                let mut state = state.lock().await;
-                                state.mp_potion_count = Some(mp_potion_count);
-
-                                // Update MP potion count - INDEPENDENT CALCULATOR
+                                // Update MP calculator
                                 let (mp_used, mp_per_min) = state.mp_calculator.update(mp_potion_count);
-
-                                // Cache MP potion stats
                                 state.latest_stats.mp_potions_used = mp_used as i32;
                                 state.latest_stats.mp_potions_per_minute = mp_per_min;
 
-                                #[cfg(debug_assertions)]
-                                println!("💊 MP Potion: used={}, per_min={:.2}",
-                                    mp_used, mp_per_min);
+                                drop(state);
 
-                                // Emit event to Frontend immediately
+                                // Emit events to Frontend
+                                app.emit("ocr:hp-potion-update", HpPotionUpdate { hp_potion_count }).ok();
                                 app.emit("ocr:mp-potion-update", MpPotionUpdate { mp_potion_count }).ok();
 
                                 #[cfg(debug_assertions)]
                                 {
                                     let elapsed = start.elapsed().as_millis();
-                                    println!("✅ MP Potion OCR: {} ({}ms)", mp_potion_count, elapsed);
+                                    println!("✅ Inventory OCR: HP={} ({}), MP={} ({}) - {}ms",
+                                        hp_potion_count, potion_config.hp_potion_slot,
+                                        mp_potion_count, potion_config.mp_potion_slot,
+                                        elapsed);
                                 }
                             }
                             Err(e) => {
                                 #[cfg(debug_assertions)]
-                                eprintln!("❌ MP Potion OCR failed: {}", e);
+                                eprintln!("❌ Inventory OCR failed: {}", e);
                             }
                         }
 
@@ -610,7 +753,7 @@ impl OcrTracker {
                     }
                     Err(e) => {
                         #[cfg(debug_assertions)]
-                        eprintln!("❌ MP Potion capture failed: {}", e);
+                        eprintln!("❌ Full screen capture failed: {}", e);
                     }
                 }
 
@@ -618,9 +761,10 @@ impl OcrTracker {
             }
 
             #[cfg(debug_assertions)]
-            println!("⏹️  MP Potion OCR task stopped");
+            println!("⏹️  Inventory OCR task stopped");
         });
     }
+
 
     /// Spawn health check loop - monitors OCR server health
     fn spawn_health_check_loop(&self, _app: AppHandle) {

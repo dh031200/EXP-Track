@@ -34,6 +34,8 @@ regex = "1.10"
 parking_lot = "0.12"
 # HTTP client for Python OCR server
 reqwest = { version = "0.12", features = ["json"] }
+imageproc = "0.25.0"
+ab_glyph = "0.2.32"
 
 [dev-dependencies]
 tokio-test = "0.4"
