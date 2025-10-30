@@ -78,7 +78,8 @@
     ],
     "resources": [
       "resources/ocr_server/*",
-      "resources/ocr_server/**/*"
+      "resources/ocr_server/**/*",
+      "resources/level_template/*.png"
     ],
     "macOS": {
       "entitlements": "entitlements.plist",

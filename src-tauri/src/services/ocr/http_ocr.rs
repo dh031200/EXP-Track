@@ -1,14 +1,17 @@
 use crate::models::ocr_result::{ExpResult, LevelResult};
+use super::template_matcher::TemplateMatcher;
 use image::DynamicImage;
 use serde::{Deserialize, Serialize};
 use base64::{Engine as _, engine::general_purpose};
 use regex::Regex;
+use std::sync::Arc;
 
 /// HTTP OCR client that communicates with Python FastAPI server
 #[derive(Clone)]
 pub struct HttpOcrClient {
     client: reqwest::Client,
     base_url: String,
+    template_matcher: Option<Arc<TemplateMatcher>>,
 }
 
 #[derive(Serialize)]
@@ -98,7 +101,18 @@ impl HttpOcrClient {
         Ok(Self {
             client,
             base_url: "http://127.0.0.1:39835".to_string(),
+            template_matcher: None,
         })
+    }
+
+    /// Initialize template matcher with resource directory
+    pub fn init_template_matcher(&mut self, template_dir: &str) -> Result<(), String> {
+        let mut matcher = TemplateMatcher::new();
+        matcher.load_templates(template_dir)
+            .map_err(|e| format!("Failed to load templates: {}", e))?;
+
+        self.template_matcher = Some(Arc::new(matcher));
+        Ok(())
     }
 
     /// Apply NMS-like filtering to remove overlapping boxes
@@ -260,8 +274,26 @@ impl HttpOcrClient {
             .map_err(|e| format!("Failed to parse MP potion count '{}': {}", digits, e))
     }
 
-    /// Recognize level from image
+    /// Recognize level from image using template matching (with RapidOCR fallback)
     pub async fn recognize_level(&self, image: &DynamicImage) -> Result<LevelResult, String> {
+        // Try template matching first if available
+        if let Some(matcher) = &self.template_matcher {
+            match matcher.recognize_level(image) {
+                Ok(level) => {
+                    println!("⚡ Level {} recognized via template matching", level);
+                    return Ok(LevelResult {
+                        level,
+                        raw_text: format!("LV. {}", level),
+                    });
+                }
+                Err(e) => {
+                    println!("⚠️  Template matching failed: {}, falling back to RapidOCR", e);
+                }
+            }
+        }
+
+        // Fall back to RapidOCR
+        println!("🔄 Using RapidOCR for level recognition");
         let text = self.recognize_text(image).await?;
         let level = Self::parse_level(&text)?;
 

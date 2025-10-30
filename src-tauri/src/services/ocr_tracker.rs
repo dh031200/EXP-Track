@@ -1,4 +1,4 @@
-use crate::commands::ocr::OcrService;
+use crate::commands::ocr::OcrServiceState;
 use crate::models::exp_data::ExpData;
 use crate::models::roi::Roi;
 use crate::services::exp_calculator::ExpCalculator;
@@ -216,15 +216,17 @@ pub struct OcrTracker {
     stop_signal: Arc<Mutex<bool>>,
     screen_capture: Arc<ScreenCapture>,
     app: AppHandle,
+    ocr_service: OcrServiceState,  // Shared OCR service instance
 }
 
 impl OcrTracker {
-    pub fn new(app: AppHandle) -> Result<Self, String> {
+    pub fn new(app: AppHandle, ocr_service: OcrServiceState) -> Result<Self, String> {
         Ok(Self {
             state: Arc::new(Mutex::new(TrackerState::new()?)),
             stop_signal: Arc::new(Mutex::new(false)),
             screen_capture: Arc::new(ScreenCapture::new()?),
             app,
+            ocr_service,  // Store shared OCR service
         })
     }
 
@@ -291,27 +293,17 @@ impl OcrTracker {
         Ok(())
     }
 
-    // Independent Level OCR loop with dedicated model instance + image caching
-    fn spawn_level_loop(&self, roi: Roi, app: AppHandle) {
+    // Independent Level OCR loop with shared OCR service + image caching
+    // NOTE: Template matching uses FULL SCREEN, not ROI (roi param unused)
+    fn spawn_level_loop(&self, _roi: Roi, app: AppHandle) {
         let state = Arc::clone(&self.state);
         let stop_signal = Arc::clone(&self.stop_signal);
         let screen_capture = Arc::clone(&self.screen_capture);
+        let ocr_service = Arc::clone(&self.ocr_service);  // Use shared service
 
         tokio::spawn(async move {
             #[cfg(debug_assertions)]
-            println!("🚀 LEVEL OCR task started - loading dedicated model instance");
-
-            // Create dedicated OCR service instance for this task
-            let ocr_service = match OcrService::new() {
-                Ok(service) => service,
-                Err(e) => {
-                    eprintln!("❌ LEVEL OCR: Failed to initialize OCR service: {}", e);
-                    return;
-                }
-            };
-
-            #[cfg(debug_assertions)]
-            println!("✅ LEVEL OCR: Model loaded successfully");
+            println!("🚀 LEVEL OCR task started - using shared OCR service (FULL SCREEN capture for template matching)");
 
             // Image cache for duplicate detection
             let mut last_image_bytes: Option<Vec<u8>> = None;
@@ -319,7 +311,9 @@ impl OcrTracker {
             while !*stop_signal.lock().await {
                 let start = std::time::Instant::now();
 
-                match screen_capture.capture_region(&roi) {
+                // For template matching: capture FULL SCREEN (not ROI)
+                // Template matching needs full screen to find orange boxes
+                match screen_capture.capture_full() {
                     Ok(image) => {
                         // Convert image to raw bytes for comparison
                         let current_bytes = image.as_bytes().to_vec();
@@ -334,8 +328,12 @@ impl OcrTracker {
                             }
                         }
 
-                        // Image changed - run OCR
-                        match ocr_service.recognize_level(&image).await {
+                        // Image changed - run OCR with FULL SCREEN
+                        let http_client = {
+                            let service = ocr_service.lock();
+                            service.http_client.clone()
+                        };
+                        match http_client.recognize_level(&image).await {
                             Ok(result) => {
                                 let mut state = state.lock().await;
                                 state.update_level(result.level);
@@ -362,7 +360,7 @@ impl OcrTracker {
                     }
                     Err(e) => {
                         #[cfg(debug_assertions)]
-                        eprintln!("❌ LEVEL capture failed: {}", e);
+                        eprintln!("❌ LEVEL full screen capture failed: {}", e);
                     }
                 }
 
@@ -374,27 +372,16 @@ impl OcrTracker {
         });
     }
 
-    // Independent EXP OCR loop with dedicated model instance + image caching
+    // Independent EXP OCR loop with shared OCR service + image caching
     fn spawn_exp_loop(&self, roi: Roi, app: AppHandle) {
         let state = Arc::clone(&self.state);
         let stop_signal = Arc::clone(&self.stop_signal);
         let screen_capture = Arc::clone(&self.screen_capture);
+        let ocr_service = Arc::clone(&self.ocr_service);  // Use shared service
 
         tokio::spawn(async move {
             #[cfg(debug_assertions)]
-            println!("🚀 EXP OCR task started - loading dedicated model instance");
-
-            // Create dedicated OCR service instance for this task
-            let ocr_service = match OcrService::new() {
-                Ok(service) => service,
-                Err(e) => {
-                    eprintln!("❌ EXP OCR: Failed to initialize OCR service: {}", e);
-                    return;
-                }
-            };
-
-            #[cfg(debug_assertions)]
-            println!("✅ EXP OCR: Model loaded successfully");
+            println!("🚀 EXP OCR task started - using shared OCR service");
 
             // Image cache for duplicate detection
             let mut last_image_bytes: Option<Vec<u8>> = None;
@@ -418,7 +405,11 @@ impl OcrTracker {
                         }
 
                         // Image changed - run OCR
-                        match ocr_service.recognize_exp(&image).await {
+                        let http_client = {
+                            let service = ocr_service.lock();
+                            service.http_client.clone()
+                        };
+                        match http_client.recognize_exp(&image).await {
                             Ok(result) => {
                                 let mut state_guard = state.lock().await;
                                 state_guard.update_exp_data(result.absolute, result.percentage);
@@ -461,27 +452,16 @@ impl OcrTracker {
         });
     }
 
-    // Independent HP Potion OCR loop with dedicated model instance + image caching
+    // Independent HP Potion OCR loop with shared OCR service + image caching
     fn spawn_hp_potion_loop(&self, roi: Roi, app: AppHandle) {
         let state = Arc::clone(&self.state);
         let stop_signal = Arc::clone(&self.stop_signal);
         let screen_capture = Arc::clone(&self.screen_capture);
+        let ocr_service = Arc::clone(&self.ocr_service);  // Use shared service
 
         tokio::spawn(async move {
             #[cfg(debug_assertions)]
-            println!("🚀 HP Potion OCR task started - loading dedicated model instance");
-
-            // Create dedicated OCR service instance for this task
-            let ocr_service = match OcrService::new() {
-                Ok(service) => service,
-                Err(e) => {
-                    eprintln!("❌ HP Potion OCR: Failed to initialize OCR service: {}", e);
-                    return;
-                }
-            };
-
-            #[cfg(debug_assertions)]
-            println!("✅ HP Potion OCR: Model loaded successfully");
+            println!("🚀 HP Potion OCR task started - using shared OCR service");
 
             // Image cache for duplicate detection
             let mut last_image_bytes: Option<Vec<u8>> = None;
@@ -505,7 +485,11 @@ impl OcrTracker {
                         }
 
                         // Image changed - run OCR
-                        match ocr_service.recognize_hp_potion_count(&image).await {
+                        let http_client = {
+                            let service = ocr_service.lock();
+                            service.http_client.clone()
+                        };
+                        match http_client.recognize_hp_potion_count(&image).await {
                             Ok(hp_potion_count) => {
                                 let mut state = state.lock().await;
                                 state.hp_potion_count = Some(hp_potion_count);
@@ -553,27 +537,16 @@ impl OcrTracker {
         });
     }
 
-    // Independent MP Potion OCR loop with dedicated model instance + image caching
+    // Independent MP Potion OCR loop with shared OCR service + image caching
     fn spawn_mp_potion_loop(&self, roi: Roi, app: AppHandle) {
         let state = Arc::clone(&self.state);
         let stop_signal = Arc::clone(&self.stop_signal);
         let screen_capture = Arc::clone(&self.screen_capture);
+        let ocr_service = Arc::clone(&self.ocr_service);  // Use shared service
 
         tokio::spawn(async move {
             #[cfg(debug_assertions)]
-            println!("🚀 MP Potion OCR task started - loading dedicated model instance");
-
-            // Create dedicated OCR service instance for this task
-            let ocr_service = match OcrService::new() {
-                Ok(service) => service,
-                Err(e) => {
-                    eprintln!("❌ MP Potion OCR: Failed to initialize OCR service: {}", e);
-                    return;
-                }
-            };
-
-            #[cfg(debug_assertions)]
-            println!("✅ MP Potion OCR: Model loaded successfully");
+            println!("🚀 MP Potion OCR task started - using shared OCR service");
 
             // Image cache for duplicate detection
             let mut last_image_bytes: Option<Vec<u8>> = None;
@@ -597,7 +570,11 @@ impl OcrTracker {
                         }
 
                         // Image changed - run OCR
-                        match ocr_service.recognize_mp_potion_count(&image).await {
+                        let http_client = {
+                            let service = ocr_service.lock();
+                            service.http_client.clone()
+                        };
+                        match http_client.recognize_mp_potion_count(&image).await {
                             Ok(mp_potion_count) => {
                                 let mut state = state.lock().await;
                                 state.mp_potion_count = Some(mp_potion_count);
@@ -649,41 +626,33 @@ impl OcrTracker {
     fn spawn_health_check_loop(&self, _app: AppHandle) {
         let state = Arc::clone(&self.state);
         let stop_signal = Arc::clone(&self.stop_signal);
+        let ocr_service = Arc::clone(&self.ocr_service);  // Use shared service
 
         tokio::spawn(async move {
             #[cfg(debug_assertions)]
-            println!("🏥 Health check loop started");
+            println!("🏥 Health check loop started - using shared OCR service");
 
             while !*stop_signal.lock().await {
-                // Create a temporary OCR service to check health
-                match OcrService::new() {
-                    Ok(service) => {
-                        match service.health_check().await {
+                // Use shared OCR service for health check
+                let http_client = {
+                    let service = ocr_service.lock();
+                    service.http_client.clone()
+                };
+                match http_client.health_check().await {
                             Ok(_) => {
-                                let mut state = state.lock().await;
-                                if !state.ocr_server_healthy {
-                                    #[cfg(debug_assertions)]
-                                    println!("✅ OCR server is now healthy");
-                                }
-                                state.ocr_server_healthy = true;
-                                state.latest_stats.ocr_server_healthy = true;
-                            }
-                            Err(e) => {
-                                let mut state = state.lock().await;
-                                if state.ocr_server_healthy {
-                                    #[cfg(debug_assertions)]
-                                    println!("❌ OCR server health check failed: {}", e);
-                                }
-                                state.ocr_server_healthy = false;
-                                state.latest_stats.ocr_server_healthy = false;
-                            }
+                        let mut state = state.lock().await;
+                        if !state.ocr_server_healthy {
+                            #[cfg(debug_assertions)]
+                            println!("✅ OCR server is now healthy");
                         }
+                        state.ocr_server_healthy = true;
+                        state.latest_stats.ocr_server_healthy = true;
                     }
                     Err(e) => {
                         let mut state = state.lock().await;
                         if state.ocr_server_healthy {
                             #[cfg(debug_assertions)]
-                            println!("❌ Failed to create OCR service for health check: {}", e);
+                            println!("❌ OCR server health check failed: {}", e);
                         }
                         state.ocr_server_healthy = false;
                         state.latest_stats.ocr_server_healthy = false;

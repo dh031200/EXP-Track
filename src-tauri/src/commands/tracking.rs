@@ -1,5 +1,6 @@
 use crate::models::roi::Roi;
 use crate::services::ocr_tracker::{OcrTracker, TrackingStats};
+use crate::commands::ocr::OcrServiceState;
 use std::sync::Arc;
 use tauri::{AppHandle, State};
 use tokio::sync::Mutex;
@@ -8,8 +9,8 @@ use tokio::sync::Mutex;
 pub struct TrackerState(pub Arc<Mutex<OcrTracker>>);
 
 impl TrackerState {
-    pub fn new(app: AppHandle) -> Result<Self, String> {
-        Ok(Self(Arc::new(Mutex::new(OcrTracker::new(app)?))))
+    pub fn new(app: AppHandle, ocr_service: OcrServiceState) -> Result<Self, String> {
+        Ok(Self(Arc::new(Mutex::new(OcrTracker::new(app, ocr_service)?))))
     }
 }
 

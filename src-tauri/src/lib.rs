@@ -56,12 +56,12 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(ScreenCaptureState::default())
         .manage(config_manager)
-        .manage(ocr_service)
+        .manage(ocr_service.clone())  // Clone for .manage()
         .manage(exp_calculator_state)
         .manage(python_server)
-        .setup(|app| {
+        .setup(move |app| {  // Move closure to capture ocr_service
             // Initialize OCR Tracker with AppHandle
-            let tracker_state = TrackerState::new(app.handle().clone())
+            let tracker_state = TrackerState::new(app.handle().clone(), ocr_service.clone())
                 .expect("Failed to initialize OCR tracker");
             app.manage(tracker_state);
 

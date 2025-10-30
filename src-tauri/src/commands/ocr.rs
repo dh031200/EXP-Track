@@ -11,17 +11,40 @@ pub type OcrServiceState = Arc<Mutex<OcrService>>;
 
 /// OCR service using HTTP client to communicate with Python server
 pub struct OcrService {
-    http_client: HttpOcrClient,
+    pub http_client: HttpOcrClient,  // Public for cloning in async tasks
 }
 
 impl OcrService {
     /// Create a new OCR service with HTTP client
     pub fn new() -> Result<Self, String> {
-        let http_client = HttpOcrClient::new()?;
+        println!("🔧 Initializing OCR Service...");
+        let mut http_client = HttpOcrClient::new()?;
+
+        // Try to initialize template matcher (non-fatal if it fails)
+        Self::try_init_template_matcher(&mut http_client).ok();
 
         Ok(Self {
             http_client,
         })
+    }
+
+    /// Try to initialize template matcher from bundled resources
+    fn try_init_template_matcher(http_client: &mut HttpOcrClient) -> Result<(), String> {
+        // Try multiple possible template paths
+        let possible_paths = vec![
+            "src-tauri/resources/level_template", // Development (from project root)
+            "resources/level_template",           // Development (from src-tauri)
+            "../Resources/level_template",        // macOS bundled
+            "./resources/level_template",         // Windows/Linux bundled
+        ];
+
+        for path in possible_paths.iter() {
+            if std::path::Path::new(path).exists() {
+                return http_client.init_template_matcher(path);
+            }
+        }
+
+        Err("Template directory not found in any expected location".to_string())
     }
 
     /// Recognize and parse level from image
