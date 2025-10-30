@@ -1,5 +1,6 @@
 use image::{DynamicImage, GrayImage, ImageBuffer, Luma, GenericImageView, RgbImage, Rgb};
 use std::path::Path;
+use rayon::prelude::*;
 
 /// Template for digit recognition
 #[derive(Debug, Clone)]
@@ -92,31 +93,38 @@ impl TemplateMatcher {
         Ok(())
     }
 
-    /// Extract orange boxes from image using HSV color filtering
+    /// Extract orange boxes from image using HSV color filtering (parallel processing)
     pub fn extract_orange_boxes(&self, image: &DynamicImage) -> Result<GrayImage, String> {
         let rgb_image = image.to_rgb8();
         let (width, height) = rgb_image.dimensions();
-        
-        let mut mask = GrayImage::new(width, height);
 
-        // Wider HSV range for lighter orange shades
-        // H[0-40]: broader orange/red spectrum
-        // S[100-255]: include lighter/desaturated oranges
-        // V[120-255]: include darker oranges
-        for y in 0..height {
-            for x in 0..width {
-                let pixel = rgb_image.get_pixel(x, y);
-                let (h, s, v) = rgb_to_hsv(pixel[0], pixel[1], pixel[2]);
+        // Process rows in parallel
+        let mask_data: Vec<u8> = (0..height)
+            .into_par_iter()
+            .flat_map(|y| {
+                let mut row_data = Vec::with_capacity(width as usize);
+                for x in 0..width {
+                    let pixel = rgb_image.get_pixel(x, y);
+                    let (h, s, v) = rgb_to_hsv(pixel[0], pixel[1], pixel[2]);
 
-                // Check if pixel is in wider orange range
-                if h >= 0.0 && h <= 40.0 && s >= 100.0 && v >= 120.0 {
-                    mask.put_pixel(x, y, Luma([255u8]));
-                } else {
-                    mask.put_pixel(x, y, Luma([0u8]));
+                    // Check if pixel is in wider orange range
+                    // H[0-40]: broader orange/red spectrum
+                    // S[100-255]: include lighter/desaturated oranges
+                    // V[120-255]: include darker oranges
+                    if h >= 0.0 && h <= 40.0 && s >= 100.0 && v >= 120.0 {
+                        row_data.push(255u8);
+                    } else {
+                        row_data.push(0u8);
+                    }
                 }
-            }
-        }
-        
+                row_data
+            })
+            .collect();
+
+        // Create mask from processed data
+        let mask = GrayImage::from_raw(width, height, mask_data)
+            .ok_or("Failed to create mask from parallel processing")?;
+
         Ok(mask)
     }
 

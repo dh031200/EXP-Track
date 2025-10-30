@@ -1,9 +1,7 @@
-use image::{DynamicImage, GrayImage, ImageBuffer, Luma, Rgb, imageops};
+use image::{DynamicImage, GrayImage, ImageBuffer, Luma, imageops};
 use std::path::Path;
 use std::collections::HashMap;
-use imageproc::drawing::{draw_hollow_rect_mut, draw_text_mut};
-use imageproc::rect::Rect;
-use ab_glyph::{FontRef, PxScale};
+use rayon::prelude::*;
 
 /// Template for digit recognition (inventory numbers)
 #[derive(Debug, Clone)]
@@ -130,15 +128,21 @@ impl InventoryTemplateMatcher {
         let gray = image.to_luma8();
         let (width, height) = gray.dimensions();
 
-        // Step 2: Binarization (threshold 70)
-        let binary = ImageBuffer::from_fn(width, height, |x, y| {
-            let pixel = gray.get_pixel(x, y);
-            if pixel[0] < 70 {
-                Luma([255u8])
-            } else {
-                Luma([0u8])
-            }
-        });
+        // Step 2: Binarization (threshold 70) - parallel processing
+        let gray_data = gray.as_raw();
+        let binary_data: Vec<u8> = gray_data
+            .par_iter()
+            .map(|&pixel| {
+                if pixel < 70 {
+                    255u8
+                } else {
+                    0u8
+                }
+            })
+            .collect();
+
+        let binary = GrayImage::from_raw(width, height, binary_data)
+            .ok_or("Failed to create binary image from parallel processing")?;
 
         // Step 3: Find candidate regions via connected components (morphology removed for speed)
         let candidates = self.find_candidate_regions(&binary)?;
@@ -624,107 +628,6 @@ impl InventoryTemplateMatcher {
         let mut slots: Vec<String> = self.slot_rois.keys().cloned().collect();
         slots.sort();
         slots
-    }
-
-    /// Save debug image showing inventory region and digit ROIs
-    pub fn save_debug_image(
-        &self,
-        full_screen: &DynamicImage,
-        inventory_region: (u32, u32, u32, u32), // (left, top, right, bottom)
-        inventory_image: &DynamicImage,
-        results: &HashMap<String, u32>,
-    ) -> Result<(), String> {
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
-        // Create debug directory
-        let debug_dir = std::path::PathBuf::from("debug_inventory");
-        if !debug_dir.exists() {
-            std::fs::create_dir_all(&debug_dir)
-                .map_err(|e| format!("Failed to create debug directory: {}", e))?;
-        }
-
-        // 1. Save full screen with inventory region marked
-        let mut full_screen_debug = full_screen.to_rgb8();
-        let (left, top, right, bottom) = inventory_region;
-
-        // Draw blue rectangle around inventory region
-        let blue = Rgb([0u8, 0u8, 255u8]);
-        let rect = Rect::at(left as i32, top as i32)
-            .of_size((right - left) as u32, (bottom - top) as u32);
-        draw_hollow_rect_mut(&mut full_screen_debug, rect, blue);
-
-        // Add text label
-        let font_data = include_bytes!("../../../resources/fonts/NotoSans-Regular.ttf");
-        let font = FontRef::try_from_slice(font_data)
-            .map_err(|e| format!("Failed to load font: {:?}", e))?;
-        let scale = PxScale::from(20.0);
-        draw_text_mut(
-            &mut full_screen_debug,
-            blue,
-            left as i32,
-            (top as i32).saturating_sub(25),
-            scale,
-            &font,
-            &format!("Inventory ({}x{})", right - left, bottom - top),
-        );
-
-        let full_screen_path = debug_dir.join(format!("01_fullscreen_{}.png", timestamp));
-        full_screen_debug.save(&full_screen_path)
-            .map_err(|e| format!("Failed to save full screen debug: {}", e))?;
-
-        // 2. Save inventory image with slot ROIs marked
-        let mut inventory_debug = inventory_image.to_rgb8();
-        let slots = vec!["shift", "ins", "home", "pup", "ctrl", "del", "end", "pdn"];
-
-        // Colors for different slots
-        let colors = vec![
-            Rgb([255u8, 0u8, 0u8]),    // shift - red
-            Rgb([0u8, 255u8, 0u8]),    // ins - green
-            Rgb([0u8, 0u8, 255u8]),    // home - blue
-            Rgb([255u8, 255u8, 0u8]),  // pup - yellow
-            Rgb([255u8, 0u8, 255u8]),  // ctrl - magenta
-            Rgb([0u8, 255u8, 255u8]),  // del - cyan
-            Rgb([255u8, 128u8, 0u8]),  // end - orange
-            Rgb([128u8, 0u8, 255u8]),  // pdn - purple
-        ];
-
-        for (idx, slot) in slots.iter().enumerate() {
-            if let Some(roi) = self.slot_rois.get(*slot) {
-                let color = colors[idx];
-                let rect = Rect::at(roi.x as i32, roi.y as i32)
-                    .of_size(roi.width, roi.height);
-                draw_hollow_rect_mut(&mut inventory_debug, rect, color);
-
-                // Add slot name and count
-                let count = results.get(*slot).unwrap_or(&0);
-                let font_data = include_bytes!("../../../resources/fonts/NotoSans-Regular.ttf");
-                let font = FontRef::try_from_slice(font_data)
-                    .map_err(|e| format!("Failed to load font: {:?}", e))?;
-                let scale = PxScale::from(16.0);
-                draw_text_mut(
-                    &mut inventory_debug,
-                    color,
-                    roi.x as i32 + 2,
-                    roi.y as i32 + 2,
-                    scale,
-                    &font,
-                    &format!("{}: {}", slot.to_uppercase(), count),
-                );
-            }
-        }
-
-        let inventory_path = debug_dir.join(format!("02_inventory_{}.png", timestamp));
-        inventory_debug.save(&inventory_path)
-            .map_err(|e| format!("Failed to save inventory debug: {}", e))?;
-
-        println!("✅ Debug images saved:");
-        println!("   - {:?}", full_screen_path);
-        println!("   - {:?}", inventory_path);
-
-        Ok(())
     }
 }
 
