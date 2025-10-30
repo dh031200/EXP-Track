@@ -27,6 +27,7 @@ import historyIcon from "/icons/history.png";
 import timerIcon from "/icons/timer.png";
 import hpIcon from "/icons/hp.png";
 import mpIcon from "/icons/mp.png";
+import mesoIcon from "/icons/meso.png";
 
 function App() {
   const [isSelecting, setIsSelecting] = useState(false);
@@ -993,12 +994,11 @@ function App() {
                         padding: 0,
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: '14px'
+                        justifyContent: 'center'
                       }}
                       title="메소 관리"
                     >
-                      💰
+                      <img src={mesoIcon} alt="Meso" style={{ width: '16px', height: '16px' }} />
                     </button>
                   </div>
                   <div style={{
@@ -1413,7 +1413,7 @@ function App() {
                         e.currentTarget.style.boxShadow = '0 2px 6px rgba(0, 0, 0, 0.15)';
                       }}
                     >
-                      💰 계산
+                      계산
                     </button>
                   </div>
 
