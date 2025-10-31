@@ -477,7 +477,7 @@ impl InventoryTemplateMatcher {
         Ok(final_detections)
     }
 
-    /// Template matching using normalized cross-correlation
+    /// Template matching using exact pixel matching for binary images
     fn match_template(&self, image: &GrayImage, template: &GrayImage, threshold: f32) -> Vec<(u32, u32, f32)> {
         let (img_width, img_height) = image.dimensions();
         let (tmpl_width, tmpl_height) = template.dimensions();
@@ -500,41 +500,28 @@ impl InventoryTemplateMatcher {
         matches
     }
 
-    /// Calculate normalized cross-correlation
+    /// Calculate binary image similarity using exact pixel matching
+    /// Optimized for binary images (0 or 255) - counts exact matches
     fn calculate_ncc(&self, image: &GrayImage, template: &GrayImage, x: u32, y: u32) -> f32 {
         let (tmpl_width, tmpl_height) = template.dimensions();
 
-        let mut sum_img = 0.0;
-        let mut sum_tmpl = 0.0;
-        let mut sum_img_sq = 0.0;
-        let mut sum_tmpl_sq = 0.0;
-        let mut sum_prod = 0.0;
-        let n = (tmpl_width * tmpl_height) as f32;
+        let mut matched_pixels = 0;
+        let total_pixels = tmpl_width * tmpl_height;
 
         for ty in 0..tmpl_height {
             for tx in 0..tmpl_width {
-                let img_val = image.get_pixel(x + tx, y + ty)[0] as f32;
-                let tmpl_val = template.get_pixel(tx, ty)[0] as f32;
+                let img_pixel = image.get_pixel(x + tx, y + ty)[0];
+                let tmpl_pixel = template.get_pixel(tx, ty)[0];
 
-                sum_img += img_val;
-                sum_tmpl += tmpl_val;
-                sum_img_sq += img_val * img_val;
-                sum_tmpl_sq += tmpl_val * tmpl_val;
-                sum_prod += img_val * tmpl_val;
+                // Exact match for binary images
+                if img_pixel == tmpl_pixel {
+                    matched_pixels += 1;
+                }
             }
         }
 
-        let mean_img = sum_img / n;
-        let mean_tmpl = sum_tmpl / n;
-
-        let numer = sum_prod - n * mean_img * mean_tmpl;
-        let denom = ((sum_img_sq - n * mean_img * mean_img) * (sum_tmpl_sq - n * mean_tmpl * mean_tmpl)).sqrt();
-
-        if denom == 0.0 {
-            return 0.0;
-        }
-
-        (numer / denom).max(0.0)
+        // Return match ratio (0.0 ~ 1.0)
+        matched_pixels as f32 / total_pixels as f32
     }
 
     /// Non-maximum suppression to remove overlapping detections
