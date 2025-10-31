@@ -79,19 +79,57 @@ impl ScreenCapture {
         // Windows: Frontend subtracts window frame offset
         
         // Apply scale factor to convert logical coordinates to physical pixels
-        // On 125% scale: logical 100x100 → physical 125x125
-        // On macOS Retina (2.0): logical 100x100 → physical 200x200
-        let physical_x = (roi.x as f64 * self.scale_factor) as u32;
-        let physical_y = (roi.y as f64 * self.scale_factor) as u32;
-        let physical_width = (roi.width as f64 * self.scale_factor) as u32;
-        let physical_height = (roi.height as f64 * self.scale_factor) as u32;
+        // macOS: xcap already returns physical coordinates, so ROI is already in physical pixels
+        // Windows/Linux: Need to scale up from logical to physical
+        #[cfg(target_os = "macos")]
+        let (physical_x, physical_y, physical_width, physical_height) = {
+            (roi.x as u32, roi.y as u32, roi.width as u32, roi.height as u32)
+        };
+
+        #[cfg(not(target_os = "macos"))]
+        let (physical_x, physical_y, physical_width, physical_height) = {
+            (
+                (roi.x as f64 * self.scale_factor) as u32,
+                (roi.y as f64 * self.scale_factor) as u32,
+                (roi.width as f64 * self.scale_factor) as u32,
+                (roi.height as f64 * self.scale_factor) as u32,
+            )
+        };
+
+        // Validate dimensions
+        if physical_width == 0 {
+            return Err(format!("Invalid ROI: width is 0 (roi.width={}, scale={})", roi.width, self.scale_factor));
+        }
+        if physical_height == 0 {
+            return Err(format!("Invalid ROI: height is 0 (roi.height={}, scale={})", roi.height, self.scale_factor));
+        }
+
+        // Calculate available space
+        let available_width = image.width().saturating_sub(physical_x);
+        let available_height = image.height().saturating_sub(physical_y);
+
+        if available_width == 0 {
+            return Err(format!("Invalid ROI: x position {} is beyond image width {}", physical_x, image.width()));
+        }
+        if available_height == 0 {
+            return Err(format!("Invalid ROI: y position {} is beyond image height {}", physical_y, image.height()));
+        }
 
         // Crop to ROI (with bounds checking)
+        let crop_width = physical_width.min(available_width);
+        let crop_height = physical_height.min(available_height);
+
+        if crop_width == 0 || crop_height == 0 {
+            return Err(format!("Invalid crop dimensions: {}x{} (roi: {}x{}, image: {}x{}, pos: {},{})",
+                crop_width, crop_height, physical_width, physical_height,
+                image.width(), image.height(), physical_x, physical_y));
+        }
+
         let cropped = image.crop_imm(
             physical_x,
             physical_y,
-            physical_width.min(image.width().saturating_sub(physical_x)),
-            physical_height.min(image.height().saturating_sub(physical_y)),
+            crop_width,
+            crop_height,
         );
 
         Ok(cropped)
