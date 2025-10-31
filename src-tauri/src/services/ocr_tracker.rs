@@ -13,6 +13,8 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 use tokio::time::sleep;
+use image::DynamicImage;
+use std::fs;
 
 /// Current tracking statistics
 #[derive(Debug, Clone, Serialize)]
@@ -525,6 +527,15 @@ impl OcrTracker {
                                                 if let Ok((_, coords)) = matcher.detect_inventory_region_with_coords(&*image) {
                                                     #[cfg(debug_assertions)]
                                                     println!("💾 Memoizing Inventory ROI: {:?}", coords);
+                                                    
+                                                    // Save original inventory preview image (not processed)
+                                                    let (left, top, right, bottom) = coords;
+                                                    let width = right - left + 1;
+                                                    let height = bottom - top + 1;
+                                                    let cropped_original = image::imageops::crop_imm(&*image, left, top, width, height);
+                                                    let dynamic_img = DynamicImage::ImageRgba8(cropped_original.to_image());
+                                                    save_inventory_preview(&dynamic_img);
+                                                    
                                                     return Ok((results, Some(coords)));
                                                 }
                                             }
@@ -969,4 +980,15 @@ impl OcrTracker {
             println!("⏹️  Health check loop stopped");
         });
     }
+}
+
+/// Helper function to save inventory preview image
+fn save_inventory_preview(image: &DynamicImage) {
+    let temp_dir = std::env::temp_dir().join("exp-tracker-previews");
+    if fs::create_dir_all(&temp_dir).is_err() {
+        return;
+    }
+
+    let file_path = temp_dir.join("inventory_preview.png");
+    let _ = image.save(&file_path);
 }

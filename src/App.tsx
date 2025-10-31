@@ -28,6 +28,7 @@ import timerIcon from "/icons/timer.png";
 import hpIcon from "/icons/hp.png";
 import mpIcon from "/icons/mp.png";
 import mesoIcon from "/icons/meso.png";
+import { SessionArchive } from './components/SessionArchive';
 
 function App() {
   const [isSelecting, setIsSelecting] = useState(false);
@@ -35,6 +36,7 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showTimerSettings, setShowTimerSettings] = useState(false);
   const [showMesoModal, setShowMesoModal] = useState(false);
+  const [showSessionArchive, setShowSessionArchive] = useState(false);
   const [mesoInputStart, setMesoInputStart] = useState('');
   const [mesoInputEnd, setMesoInputEnd] = useState('');
   const [potionPriceInputHp, setPotionPriceInputHp] = useState('');
@@ -439,6 +441,22 @@ function App() {
     await window.setSize(new LogicalSize(540, 130));
   };
 
+  const handleOpenSessionArchive = async () => {
+    setShowSessionArchive(true);
+    
+    const window = getCurrentWindow();
+    await window.setResizable(false);
+    await window.setSize(new LogicalSize(540, 700));
+  };
+
+  const handleCloseSessionArchive = async () => {
+    setShowSessionArchive(false);
+    
+    const window = getCurrentWindow();
+    await window.setResizable(true);
+    await window.setSize(new LogicalSize(540, 130));
+  };
+
   const handleMesoCalculate = () => {
     let startValue: number | null = null;
     let endValue: number | null = null;
@@ -623,13 +641,13 @@ function App() {
           display: 'flex',
           flexDirection: 'column',
           position: 'relative',
-          cursor: (!isSelecting && !showSettings && !showMesoModal && !showRoiModal) ? 'move' : 'default',
+          cursor: (!isSelecting && !showSettings && !showMesoModal && !showRoiModal && !showSessionArchive) ? 'move' : 'default',
           pointerEvents: isSelecting ? 'none' : 'auto',
         }}
-        onMouseDown={!isSelecting && !showSettings && !showMesoModal && !showRoiModal ? handleDragStart : undefined}
+        onMouseDown={!isSelecting && !showSettings && !showMesoModal && !showRoiModal && !showSessionArchive ? handleDragStart : undefined}
       >
         {/* OCR Status - Left side of title bar */}
-        {!isSelecting && !showSettings && !showMesoModal && !showRoiModal && (
+        {!isSelecting && !showSettings && !showMesoModal && !showRoiModal && !showSessionArchive && (
           <div
             onMouseDown={(e) => e.stopPropagation()}
             style={{
@@ -657,7 +675,7 @@ function App() {
         )}
 
         {/* Window Controls are now positioned relative to this container */}
-        {!isSelecting && !showSettings && !showMesoModal && !showRoiModal && (
+        {!isSelecting && !showSettings && !showMesoModal && !showRoiModal && !showSessionArchive && (
           <div
             onMouseDown={(e) => e.stopPropagation()}
             style={{
@@ -735,15 +753,15 @@ function App() {
             style={{
               flex: 1,
               display: 'flex',
-              flexDirection: (showSettings || showMesoModal || showRoiModal) ? 'column' : 'row',
-              alignItems: (showSettings || showMesoModal || showRoiModal) ? 'stretch' : 'center',
-              padding: isSelecting ? '0' : (showSettings || showMesoModal || showRoiModal) ? '0' : '0 12px 8px 12px',
+              flexDirection: (showSettings || showMesoModal || showRoiModal || showSessionArchive) ? 'column' : 'row',
+              alignItems: (showSettings || showMesoModal || showRoiModal || showSessionArchive) ? 'stretch' : 'center',
+              padding: isSelecting ? '0' : (showSettings || showMesoModal || showRoiModal || showSessionArchive) ? '0' : '0 12px 8px 12px',
               gap: '4px',
-              userSelect: (showSettings || showMesoModal || showRoiModal) ? 'auto' : 'none',
-              overflow: (showSettings || showMesoModal || showRoiModal) ? 'auto' : 'hidden',
+              userSelect: (showSettings || showMesoModal || showRoiModal || showSessionArchive) ? 'auto' : 'none',
+              overflow: (showSettings || showMesoModal || showRoiModal || showSessionArchive) ? 'auto' : 'hidden',
             }}
           >
-            {!isSelecting && !showSettings && !showMesoModal && !showRoiModal && (
+            {!isSelecting && !showSettings && !showMesoModal && !showRoiModal && !showSessionArchive && (
               <>
                 {/* Section 1: 세션 시간 */}
                 <div 
@@ -934,12 +952,45 @@ function App() {
                       </div>
                     </div>
                     <div>
-                      <div style={{
-                        fontSize: '14px',
-                        fontWeight: 600,
-                        color: '#666'
+                      <div style={{ 
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px'
                       }}>
-                        획득 경험치
+                        <span style={{
+                          fontSize: '14px',
+                          fontWeight: 600,
+                          color: '#666'
+                        }}>
+                          획득 경험치
+                        </span>
+                        <button
+                          onClick={handleOpenSessionArchive}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          style={{
+                            width: '24px',
+                            height: '24px',
+                            background: 'rgba(255, 193, 7, 0.1)',
+                            border: '1px solid rgba(255, 193, 7, 0.3)',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            padding: 0,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '14px',
+                            transition: 'all 0.15s ease'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.transform = 'scale(1.2)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.transform = 'scale(1)';
+                          }}
+                          title="전투 기록 보관함"
+                        >
+                          🏆️
+                        </button>
                       </div>
                       <div style={{
                         fontSize: '16px',
@@ -960,7 +1011,7 @@ function App() {
                     lineHeight: '1.2'
                   }}>
                     <div>현재: Lv.{parallelOcrTracker.stats?.level || '?'} ({parallelOcrTracker.stats?.percentage?.toFixed(2) || '0.00'}%)</div>
-                    <div>평균: {formatKoreanNumber(Math.floor((parallelOcrTracker.stats?.exp_per_hour || 0) / 3600))}(1초당)</div>
+                    <div>평균: {formatKoreanNumber(Math.floor((parallelOcrTracker.stats?.exp_per_hour || 0) / 3600))} (1초당)</div>
                   </div>
                 </div>
 
@@ -1002,6 +1053,12 @@ function App() {
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = 'scale(1.2)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = 'scale(1)';
                       }}
                       title="메소 관리"
                     >
@@ -1545,6 +1602,82 @@ function App() {
                       💾 저장
                     </button>
                   </div>
+                </div>
+              </>
+            )}
+
+            {!isSelecting && showSessionArchive && (
+              <>
+                {/* Draggable Title Bar for Session Archive */}
+                <div
+                  onMouseDown={handleDragStart}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    height: '40px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'move',
+                    zIndex: 999,
+                    userSelect: 'none'
+                  }}
+                >
+                  <span style={{
+                    fontSize: '12px',
+                    fontWeight: '600',
+                    color: '#999'
+                  }}>
+                    전투 기록
+                  </span>
+                </div>
+
+                {/* Back Button */}
+                <button
+                  onClick={handleCloseSessionArchive}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  style={{
+                    position: 'absolute',
+                    top: '8px',
+                    left: '8px',
+                    padding: '6px 12px',
+                    fontSize: '13px',
+                    background: 'rgba(255, 255, 255, 0.95)',
+                    color: '#333',
+                    border: '1px solid rgba(0, 0, 0, 0.2)',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    fontWeight: '600',
+                    zIndex: 1000,
+                    boxShadow: '0 2px 6px rgba(0, 0, 0, 0.1)'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(240, 240, 240, 1)';
+                    e.currentTarget.style.transform = 'scale(1.05)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.95)';
+                    e.currentTarget.style.transform = 'scale(1)';
+                  }}
+                >
+                  ← 뒤로
+                </button>
+
+                {/* Session Archive Content with Top Padding */}
+                <div style={{ paddingTop: '40px', width: '100%', height: '100%', overflow: 'auto' }}>
+                  <SessionArchive 
+                    currentSession={parallelOcrTracker.stats ? {
+                      elapsed_seconds: elapsedSeconds,
+                      total_exp: parallelOcrTracker.stats.total_exp,
+                      level: parallelOcrTracker.stats.level || 0,
+                      exp_per_second: (parallelOcrTracker.stats.exp_per_hour || 0) / 3600,
+                      hp_potions_used: parallelOcrTracker.stats.hp_potions_used,
+                      mp_potions_used: parallelOcrTracker.stats.mp_potions_used,
+                    } : null}
+                  />
                 </div>
               </>
             )}

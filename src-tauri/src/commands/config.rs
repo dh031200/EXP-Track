@@ -15,6 +15,7 @@ pub enum RoiType {
     Exp,
     Hp,
     Mp,
+    Inventory,  // Auto-detected inventory region (read-only preview)
     // Meso, // Commented out temporarily
     // MapLocation, // Commented out temporarily
 }
@@ -48,6 +49,9 @@ pub fn save_roi(
         RoiType::Exp => config.roi.exp = Some(roi),
         RoiType::Hp => config.roi.hp = Some(roi),
         RoiType::Mp => config.roi.mp = Some(roi),
+        RoiType::Inventory => {
+            return Err("Inventory ROI is auto-detected and cannot be manually saved".to_string());
+        }
         // RoiType::Meso => config.roi.meso = Some(roi), // Commented out temporarily
         // RoiType::MapLocation => config.roi.map_location = Some(roi), // Commented out temporarily
     }
@@ -72,6 +76,9 @@ pub fn load_roi(state: State<ConfigManagerState>, roi_type: RoiType) -> Result<O
         RoiType::Exp => config.roi.exp,
         RoiType::Hp => config.roi.hp,
         RoiType::Mp => config.roi.mp,
+        RoiType::Inventory => {
+            return Err("Inventory ROI is auto-detected and cannot be manually loaded".to_string());
+        }
         // RoiType::Meso => config.roi.meso, // Commented out temporarily
         // RoiType::MapLocation => config.roi.map_location, // Commented out temporarily
     };
@@ -107,6 +114,9 @@ pub fn clear_roi(state: State<ConfigManagerState>, roi_type: RoiType) -> Result<
         RoiType::Exp => config.roi.exp = None,
         RoiType::Hp => config.roi.hp = None,
         RoiType::Mp => config.roi.mp = None,
+        RoiType::Inventory => {
+            return Err("Inventory ROI is auto-detected and cannot be manually cleared".to_string());
+        }
         // RoiType::Meso => config.roi.meso = None, // Commented out temporarily
         // RoiType::MapLocation => config.roi.map_location = None, // Commented out temporarily
     }
@@ -169,6 +179,7 @@ pub fn save_roi_preview(roi_type: RoiType, image_data: String) -> Result<String,
         RoiType::Exp => "exp",
         RoiType::Hp => "hp",
         RoiType::Mp => "mp",
+        RoiType::Inventory => "inventory",
         // RoiType::Meso => "meso", // Commented out temporarily
         // RoiType::MapLocation => "map_location", // Commented out temporarily
     });
@@ -189,6 +200,7 @@ pub fn get_roi_preview(roi_type: RoiType) -> Result<String, String> {
         RoiType::Exp => "exp",
         RoiType::Hp => "hp",
         RoiType::Mp => "mp",
+        RoiType::Inventory => "inventory",
     });
     let file_path = temp_dir.join(&filename);
 
@@ -212,6 +224,7 @@ pub fn open_roi_preview(roi_type: RoiType) -> Result<(), String> {
         RoiType::Exp => "exp",
         RoiType::Hp => "hp",
         RoiType::Mp => "mp",
+        RoiType::Inventory => "inventory",
         // RoiType::Meso => "meso", // Commented out temporarily
         // RoiType::MapLocation => "map_location", // Commented out temporarily
     });

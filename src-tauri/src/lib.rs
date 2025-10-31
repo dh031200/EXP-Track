@@ -26,6 +26,10 @@ use commands::exp::{
 use commands::tracking::{
     get_tracking_stats, reset_tracking, start_ocr_tracking, stop_ocr_tracking, TrackerState,
 };
+use commands::session::{
+    get_session_records, save_session_record, delete_session_record, update_session_title,
+    init_session_records, SessionRecordsState,
+};
 use services::exp_calculator::ExpCalculator;
 use services::python_server::PythonServerManager;
 use std::sync::Mutex;
@@ -52,6 +56,9 @@ pub fn run() {
     // Initialize Python server manager
     let python_server = AsyncMutex::new(PythonServerManager::new());
 
+    // Initialize session records
+    let session_records = init_session_records();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -60,6 +67,7 @@ pub fn run() {
         .manage(ocr_service.clone())  // Clone for .manage()
         .manage(exp_calculator_state)
         .manage(python_server)
+        .manage(session_records)
         .setup(move |app| {  // Move closure to capture ocr_service
             // Initialize OCR Tracker with AppHandle
             let tracker_state = TrackerState::new(app.handle().clone(), ocr_service.clone())
@@ -170,7 +178,11 @@ pub fn run() {
             start_ocr_tracking,
             stop_ocr_tracking,
             get_tracking_stats,
-            reset_tracking
+            reset_tracking,
+            get_session_records,
+            save_session_record,
+            delete_session_record,
+            update_session_title
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

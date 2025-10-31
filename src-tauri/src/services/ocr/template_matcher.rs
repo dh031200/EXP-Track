@@ -1,4 +1,4 @@
-use image::{DynamicImage, GrayImage, ImageBuffer, Luma, GenericImageView, RgbImage, Rgb};
+use image::{DynamicImage, GrayImage, ImageBuffer, Luma};
 use std::path::Path;
 use rayon::prelude::*;
 
@@ -49,7 +49,7 @@ impl TemplateMatcher {
             return Err(format!("Template directory not found: {:?}", template_dir));
         }
 
-        let mut loaded_count = 0;
+        let mut _loaded_count = 0;
         let entries = std::fs::read_dir(template_dir)
             .map_err(|e| format!("Failed to read template directory: {}", e))?;
 
@@ -84,7 +84,7 @@ impl TemplateMatcher {
                             name: filename.to_string(),
                         });
                         
-                        loaded_count += 1;
+                        _loaded_count += 1;
                     }
                 }
             }
