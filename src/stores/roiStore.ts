@@ -134,12 +134,11 @@ export const useRoiStore = create<RoiState>()(
       loadAllRois: async () => {
         set({ isLoading: true, error: null });
         try {
-          const [levelRoi, expRoi, hpRoi, mpRoi, inventoryRoi] = await Promise.all([
+          const [levelRoi, expRoi, hpRoi, mpRoi] = await Promise.all([
             loadRoi('level'),
             loadRoi('exp'),
             loadRoi('hp'),
             loadRoi('mp'),
-            loadRoi('inventory'),
             // loadRoi('mapLocation'), // Commented out temporarily
           ]);
 
@@ -148,7 +147,7 @@ export const useRoiStore = create<RoiState>()(
             expRoi,
             hpRoi,
             mpRoi,
-            inventoryRoi,
+            // inventoryRoi is auto-detected, not loaded from config
             // mapLocationRoi, // Commented out temporarily
             isLoading: false,
           });

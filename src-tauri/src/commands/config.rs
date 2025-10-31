@@ -50,7 +50,9 @@ pub fn save_roi(
         RoiType::Hp => config.roi.hp = Some(roi),
         RoiType::Mp => config.roi.mp = Some(roi),
         RoiType::Inventory => {
-            return Err("Inventory ROI is auto-detected and cannot be manually saved".to_string());
+            // Inventory ROI is auto-detected, but we allow saving it temporarily
+            // It won't be persisted to config file, just kept in memory
+            return Ok(());
         }
         // RoiType::Meso => config.roi.meso = Some(roi), // Commented out temporarily
         // RoiType::MapLocation => config.roi.map_location = Some(roi), // Commented out temporarily
