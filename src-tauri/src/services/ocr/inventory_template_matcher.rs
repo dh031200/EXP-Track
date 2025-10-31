@@ -180,20 +180,11 @@ impl InventoryTemplateMatcher {
         // Step 5: Crop inventory region from original grayscale
         let cropped_gray = imageops::crop_imm(&gray, *left, *top, inv_width, inv_height).to_image();
 
-        // Step 6: Resize to standard 522x255 for consistent template matching
-        // NEAREST preserves sharp edges for better digit recognition
-        let resized_gray = image::imageops::resize(
-            &cropped_gray,
-            522,
-            255,
-            image::imageops::FilterType::Nearest,
-        );
-
-        // Step 7: Final threshold for OCR (threshold 1)
+        // Step 6: Final threshold for OCR (threshold 1)
         // Dark pixels (< 1) become white (255) - digits
         // Bright pixels (≥ 1) become black (0) - background
-        let final_binary = ImageBuffer::from_fn(522, 255, |x, y| {
-            let pixel = resized_gray.get_pixel(x, y);
+        let final_binary = ImageBuffer::from_fn(inv_width, inv_height, |x, y| {
+            let pixel = cropped_gray.get_pixel(x, y);
             if pixel[0] < 1 {
                 Luma([255u8])  // Dark pixels → white
             } else {
@@ -205,7 +196,7 @@ impl InventoryTemplateMatcher {
     }
 
     /// Detect inventory region from full screenshot
-    /// Returns 522x255 standardized inventory image
+    /// Returns original-size inventory image (no resize)
     pub fn detect_inventory_region(&self, image: &DynamicImage) -> Result<DynamicImage, String> {
         let (inventory_image, _coords) = self.detect_inventory_region_with_coords(image)?;
         Ok(inventory_image)
@@ -383,16 +374,24 @@ impl InventoryTemplateMatcher {
     /// Recognize counts in all 8 inventory slots
     /// Returns HashMap with slot names as keys and item counts as values
     pub fn recognize_all_slots(&self, inventory_image: &DynamicImage) -> Result<HashMap<String, u32>, String> {
-        // Inventory image is always 522x255 after standardization
-        // Calculate slot ROIs dynamically based on this standard size
-        let slot_rois = Self::calculate_slot_rois(522, 255);
+        // Calculate slot ROIs dynamically based on actual inventory size
+        let width = inventory_image.width();
+        let height = inventory_image.height();
+        let slot_rois = Self::calculate_slot_rois(width, height);
 
         let mut results = HashMap::new();
         let slots = vec!["shift", "ins", "home", "pup", "ctrl", "del", "end", "pdn"];
 
+        #[cfg(debug_assertions)]
+        println!("    📦 Inventory slots ({}x{}):", width, height);
+
         for slot in slots {
             // Recognize count in this slot, default to 0 if recognition fails
             let count = self.recognize_count_in_slot(inventory_image, &slot_rois, slot).unwrap_or(0);
+
+            #[cfg(debug_assertions)]
+            println!("       {} = {}", slot, count);
+
             results.insert(slot.to_string(), count);
         }
 
@@ -401,9 +400,6 @@ impl InventoryTemplateMatcher {
 
     /// Detect all digits in ROI using multi-scale template matching
     fn detect_digits_in_roi(&self, gray: &GrayImage, roi: &SlotRoi) -> Result<Vec<DigitDetection>, String> {
-        #[cfg(debug_assertions)]
-        let t_start = std::time::Instant::now();
-
         // Extract ROI
         let roi_image = image::imageops::crop_imm(
             gray,
@@ -412,9 +408,6 @@ impl InventoryTemplateMatcher {
             roi.width,
             roi.height,
         ).to_image();
-
-        #[cfg(debug_assertions)]
-        let t_crop = std::time::Instant::now();
 
         // Multi-scale template matching
         let scales = vec![0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3];
@@ -469,28 +462,11 @@ impl InventoryTemplateMatcher {
             })
             .collect();
 
-        #[cfg(debug_assertions)]
-        let t_matching_done = std::time::Instant::now();
-
         // Apply NMS to remove overlapping detections
         let filtered = self.non_maximum_suppression(all_detections, 0.05)?;
 
-        #[cfg(debug_assertions)]
-        let t_nms = std::time::Instant::now();
-
         // Filter by height consistency
         let height_filtered = self.filter_by_height(filtered, 0.2)?;
-
-        #[cfg(debug_assertions)]
-        {
-            let t_height = std::time::Instant::now();
-            println!("        🔍 detect_digits_in_roi breakdown:");
-            println!("           Crop: {}ms", (t_crop - t_start).as_millis());
-            println!("           Parallel matching (10 templates × 8 scales): {}ms", (t_matching_done - t_crop).as_millis());
-            println!("           NMS: {}ms", (t_nms - t_matching_done).as_millis());
-            println!("           Height filter: {}ms", (t_height - t_nms).as_millis());
-            println!("           Total: {}ms", (t_height - t_start).as_millis());
-        }
 
         // Remove duplicates
         let final_detections = self.remove_duplicates(height_filtered, 5)?;
