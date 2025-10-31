@@ -1,0 +1,303 @@
+.session-archive {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  padding: 0 16px 16px 16px;
+  box-sizing: border-box;
+}
+
+.session-archive-header {
+  margin-bottom: 16px;
+  text-align: center;
+}
+
+.session-archive-header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+}
+
+/* Current Session Card */
+.current-session-card {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  padding: 16px;
+  margin: 16px 0 16px 0;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.current-session-card h3 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+}
+
+.session-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.current-session-card .stat-label {
+  font-size: 11px;
+  color: #999;
+  font-weight: 500;
+}
+
+.current-session-card .stat-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: #333;
+}
+
+.save-session-form {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.session-name-input {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 14px;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  outline: none;
+  transition: all 0.2s ease;
+  box-sizing: border-box;
+}
+
+.session-name-input:focus {
+  border-color: #4CAF50;
+}
+
+.save-session-btn {
+  width: 100%;
+  padding: 12px;
+  background: white;
+  color: #667eea;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.save-session-btn:hover:not(:disabled) {
+  background: #f0f0f0;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.save-session-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Saved Sessions */
+.saved-sessions {
+  margin-top: 0;
+}
+
+.saved-sessions h3 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+}
+
+.empty-sessions {
+  text-align: center;
+  padding: 40px 20px;
+  color: #999;
+}
+
+.empty-sessions p {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+}
+
+.empty-hint {
+  font-size: 12px;
+  color: #bbb;
+}
+
+/* Sessions List */
+.sessions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.session-record-card {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  padding: 16px;
+  transition: all 0.2s ease;
+}
+
+.session-record-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+}
+
+.session-record-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.session-title-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.title-display-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.session-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #333;
+}
+
+.edit-title-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 4px;
+  opacity: 0.6;
+  transition: all 0.15s ease;
+}
+
+.edit-title-btn:hover {
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+.title-edit-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.title-edit-input {
+  flex: 1;
+  padding: 6px 10px;
+  font-size: 14px;
+  border: 2px solid #4CAF50;
+  border-radius: 6px;
+  outline: none;
+  font-weight: 600;
+}
+
+.title-save-btn,
+.title-cancel-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.title-save-btn {
+  color: #4CAF50;
+}
+
+.title-save-btn:hover {
+  background: #e8f5e9;
+  transform: scale(1.1);
+}
+
+.title-cancel-btn {
+  color: #f44336;
+}
+
+.title-cancel-btn:hover {
+  background: #ffebee;
+  transform: scale(1.1);
+}
+
+.session-timestamp {
+  font-size: 11px;
+  color: #999;
+  font-weight: 500;
+}
+
+.session-date {
+  font-size: 13px;
+  font-weight: 600;
+  color: #666;
+}
+
+.delete-session-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.delete-session-btn:hover {
+  background: #ffebee;
+  transform: scale(1.1);
+}
+
+.session-record-card .stat-label {
+  font-size: 11px;
+  color: #999;
+  font-weight: 500;
+}
+
+.session-record-card .stat-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: #333;
+}
+
+/* Scrollbar Styling */
+.session-archive::-webkit-scrollbar {
+  width: 8px;
+}
+
+.session-archive::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+.session-archive::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 4px;
+}
+
+.session-archive::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
