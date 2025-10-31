@@ -284,6 +284,19 @@ impl TemplateMatcher {
             // Debug: Save box image
             box_img.save(debug_dir.join(format!("{}_3_box_{}.png", timestamp, idx))).ok();
 
+            // Check width/height ratio after crop (0.79 ~ 0.91)
+            let w_h_ratio = bbox.width as f32 / bbox.height as f32;
+            const MIN_WH_RATIO: f32 = 0.79;
+            const MAX_WH_RATIO: f32 = 0.91;
+
+            if w_h_ratio < MIN_WH_RATIO || w_h_ratio > MAX_WH_RATIO {
+                println!("⚠️  Box {} skipped: w/h ratio={:.3} out of range [{:.2}~{:.2}]",
+                    idx, w_h_ratio, MIN_WH_RATIO, MAX_WH_RATIO);
+                continue;
+            }
+
+            println!("✅ Box {} w/h ratio: {:.3} ({}x{})", idx, w_h_ratio, bbox.width, bbox.height);
+
             // Extract white digit
             let white_digit = self.extract_white_digit(&box_img)?;
 
@@ -291,8 +304,8 @@ impl TemplateMatcher {
             DynamicImage::ImageLuma8(white_digit.clone())
                 .save(debug_dir.join(format!("{}_4_white_digit_{}.png", timestamp, idx))).ok();
 
-            // Check white pixel ratio (9% ~ 21.5%)
-            const MIN_WHITE_RATIO: f32 = 9.0;
+            // Check white pixel ratio (7.5% ~ 21.5%)
+            const MIN_WHITE_RATIO: f32 = 7.5;
             const MAX_WHITE_RATIO: f32 = 21.5;
 
             let total_pixels = (35 * 41) as f32;
