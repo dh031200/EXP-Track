@@ -35,7 +35,6 @@ pub struct DigitDetection {
 /// Inventory template matcher for potion counting
 pub struct InventoryTemplateMatcher {
     templates: Vec<InventoryTemplate>,
-    slot_rois: HashMap<String, SlotRoi>,
 }
 
 impl InventoryTemplateMatcher {
@@ -43,26 +42,44 @@ impl InventoryTemplateMatcher {
     pub fn new() -> Self {
         Self {
             templates: Vec::new(),
-            slot_rois: Self::init_slot_rois(),
         }
     }
 
-    /// Initialize slot ROI mappings
-    /// Based on 522x255px inventory image with 4x2 grid layout
-    fn init_slot_rois() -> HashMap<String, SlotRoi> {
+    /// Calculate slot ROIs dynamically based on actual inventory image size
+    /// Reference: 522x255px inventory with 4x2 grid layout
+    fn calculate_slot_rois(width: u32, height: u32) -> HashMap<String, SlotRoi> {
         let mut rois = HashMap::new();
 
-        // Row 0 (top row): y=64-125 (height=61)
-        rois.insert("shift".to_string(), SlotRoi { x: 0,   y: 64,  width: 130, height: 61 });
-        rois.insert("ins".to_string(),   SlotRoi { x: 130, y: 64,  width: 131, height: 61 });
-        rois.insert("home".to_string(),  SlotRoi { x: 261, y: 64,  width: 130, height: 61 });
-        rois.insert("pup".to_string(),   SlotRoi { x: 391, y: 64,  width: 130, height: 61 });
+        // Row proportions (based on 522x255 reference)
+        // Row 0: y=64-125 → top=0.2510, bottom=0.4902
+        // Row 1: y=196-254 → top=0.7686, bottom=0.9961
+        let row0_top = (height as f32 * 0.2510) as u32;
+        let row0_bottom = (height as f32 * 0.4902) as u32;
+        let row1_top = (height as f32 * 0.7686) as u32;
+        let row1_bottom = (height as f32 * 0.9961) as u32;
 
-        // Row 1 (bottom row): y=196-254 (height=58)
-        rois.insert("ctrl".to_string(),  SlotRoi { x: 0,   y: 196, width: 130, height: 58 });
-        rois.insert("del".to_string(),   SlotRoi { x: 130, y: 196, width: 131, height: 58 });
-        rois.insert("end".to_string(),   SlotRoi { x: 261, y: 196, width: 130, height: 58 });
-        rois.insert("pdn".to_string(),   SlotRoi { x: 391, y: 196, width: 130, height: 58 });
+        let row0_height = row0_bottom - row0_top;
+        let row1_height = row1_bottom - row1_top;
+
+        // Column proportions (based on 522 width reference)
+        // Boundaries: 0, 130, 261, 391, 521 → 0.0, 0.2490, 0.5000, 0.7491, 0.9981
+        let col0 = 0;
+        let col1 = (width as f32 * 0.2490) as u32;
+        let col2 = (width as f32 * 0.5000) as u32;
+        let col3 = (width as f32 * 0.7491) as u32;
+        let col4 = (width as f32 * 0.9981) as u32;
+
+        // Row 0 (top row)
+        rois.insert("shift".to_string(), SlotRoi { x: col0, y: row0_top, width: col1 - col0, height: row0_height });
+        rois.insert("ins".to_string(),   SlotRoi { x: col1, y: row0_top, width: col2 - col1, height: row0_height });
+        rois.insert("home".to_string(),  SlotRoi { x: col2, y: row0_top, width: col3 - col2, height: row0_height });
+        rois.insert("pup".to_string(),   SlotRoi { x: col3, y: row0_top, width: col4 - col3, height: row0_height });
+
+        // Row 1 (bottom row)
+        rois.insert("ctrl".to_string(),  SlotRoi { x: col0, y: row1_top, width: col1 - col0, height: row1_height });
+        rois.insert("del".to_string(),   SlotRoi { x: col1, y: row1_top, width: col2 - col1, height: row1_height });
+        rois.insert("end".to_string(),   SlotRoi { x: col2, y: row1_top, width: col3 - col2, height: row1_height });
+        rois.insert("pdn".to_string(),   SlotRoi { x: col3, y: row1_top, width: col4 - col3, height: row1_height });
 
         rois
     }
@@ -123,6 +140,7 @@ impl InventoryTemplateMatcher {
 
     /// Detect inventory region from full screenshot with debug info
     /// Returns (inventory_image, (left, top, right, bottom))
+    /// Note: Returns original-size inventory region (no resize) for better quality
     pub fn detect_inventory_region_with_coords(&self, image: &DynamicImage) -> Result<(DynamicImage, (u32, u32, u32, u32)), String> {
         // Step 1: Convert to grayscale
         let gray = image.to_luma8();
@@ -144,7 +162,7 @@ impl InventoryTemplateMatcher {
         let binary = GrayImage::from_raw(width, height, binary_data)
             .ok_or("Failed to create binary image from parallel processing")?;
 
-        // Step 3: Find candidate regions via connected components (morphology removed for speed)
+        // Step 3: Find candidate regions via connected components
         let candidates = self.find_candidate_regions(&binary)?;
 
         if candidates.is_empty() {
@@ -159,22 +177,14 @@ impl InventoryTemplateMatcher {
         let inv_width = right - left + 1;
         let inv_height = bottom - top + 1;
 
-        // Step 5: Crop inventory region FROM ORIGINAL GREYSCALE (same as Python line 177)
+        // Step 5: Crop inventory region from original grayscale
         let cropped_gray = imageops::crop_imm(&gray, *left, *top, inv_width, inv_height).to_image();
 
-        // Step 6: Resize to standard 522x255 with NEAREST (same as Python line 181)
-        // IMPORTANT: Use Nearest (not Lanczos3) to preserve sharp edges for template matching
-        let resized_gray = image::imageops::resize(
-            &cropped_gray,
-            522,
-            255,
-            image::imageops::FilterType::Nearest,  // Changed from Lanczos3 to Nearest
-        );
-
-        // Step 7: Final threshold for OCR (threshold 1, same as Python line 186)
-        // Dark pixels (< 1) become white (255)
-        let final_binary = ImageBuffer::from_fn(522, 255, |x, y| {
-            let pixel = resized_gray.get_pixel(x, y);
+        // Step 6: Final threshold for OCR (threshold 1)
+        // Dark pixels (< 1) become white (255) - digits
+        // Bright pixels (≥ 1) become black (0) - background
+        let final_binary = ImageBuffer::from_fn(inv_width, inv_height, |x, y| {
+            let pixel = cropped_gray.get_pixel(x, y);
             if pixel[0] < 1 {
                 Luma([255u8])  // Dark pixels → white
             } else {
@@ -186,7 +196,7 @@ impl InventoryTemplateMatcher {
     }
 
     /// Detect inventory region from full screenshot
-    /// Returns 522x255px inventory image
+    /// Returns original-size inventory image (no resize)
     pub fn detect_inventory_region(&self, image: &DynamicImage) -> Result<DynamicImage, String> {
         let (inventory_image, _coords) = self.detect_inventory_region_with_coords(image)?;
         Ok(inventory_image)
@@ -334,34 +344,18 @@ impl InventoryTemplateMatcher {
     }
 
     /// Recognize potion count in specific slot
-    pub fn recognize_count_in_slot(&self, inventory_image: &DynamicImage, slot: &str) -> Result<u32, String> {
-        #[cfg(debug_assertions)]
-        let t_start = std::time::Instant::now();
-
+    pub fn recognize_count_in_slot(&self, inventory_image: &DynamicImage, slot_rois: &HashMap<String, SlotRoi>, slot: &str) -> Result<u32, String> {
         // Get ROI for slot
-        let roi = self.slot_rois.get(slot)
+        let roi = slot_rois.get(slot)
             .ok_or(format!("Invalid slot: {}", slot))?;
 
         // Convert to grayscale
         let gray = inventory_image.to_luma8();
 
-        // Verify inventory image size
-        if gray.width() != 522 || gray.height() != 255 {
-            return Err(format!("Invalid inventory size: {}x{} (expected 522x255)", gray.width(), gray.height()));
-        }
-
-        #[cfg(debug_assertions)]
-        let t_prep = std::time::Instant::now();
-
         // Detect digits in ROI
         let detections = self.detect_digits_in_roi(&gray, roi)?;
 
-        #[cfg(debug_assertions)]
-        let t_detect = std::time::Instant::now();
-
         if detections.is_empty() {
-            #[cfg(debug_assertions)]
-            println!("      📍 Slot '{}': 0 (empty, took {}ms)", slot, (t_detect - t_start).as_millis());
             return Ok(0); // Empty slot
         }
 
@@ -374,47 +368,24 @@ impl InventoryTemplateMatcher {
         let count = number_str.parse::<u32>()
             .map_err(|e| format!("Failed to parse potion count: {}", e))?;
 
-        #[cfg(debug_assertions)]
-        {
-            let t_end = std::time::Instant::now();
-            println!("      📍 Slot '{}': {} (prep: {}ms, detect: {}ms, total: {}ms)",
-                slot, count,
-                (t_prep - t_start).as_millis(),
-                (t_detect - t_prep).as_millis(),
-                (t_end - t_start).as_millis());
-        }
-
         Ok(count)
     }
 
     /// Recognize counts in all 8 inventory slots
     /// Returns HashMap with slot names as keys and item counts as values
     pub fn recognize_all_slots(&self, inventory_image: &DynamicImage) -> Result<HashMap<String, u32>, String> {
-        #[cfg(debug_assertions)]
-        let t_start = std::time::Instant::now();
-
-        // Verify inventory image size
-        let gray = inventory_image.to_luma8();
-        if gray.width() != 522 || gray.height() != 255 {
-            return Err(format!("Invalid inventory size: {}x{} (expected 522x255)", gray.width(), gray.height()));
-        }
-
-        #[cfg(debug_assertions)]
-        println!("    🎰 Processing 8 inventory slots...");
+        // Calculate slot ROIs dynamically based on actual inventory size
+        let width = inventory_image.width();
+        let height = inventory_image.height();
+        let slot_rois = Self::calculate_slot_rois(width, height);
 
         let mut results = HashMap::new();
         let slots = vec!["shift", "ins", "home", "pup", "ctrl", "del", "end", "pdn"];
 
         for slot in slots {
             // Recognize count in this slot, default to 0 if recognition fails
-            let count = self.recognize_count_in_slot(inventory_image, slot).unwrap_or(0);
+            let count = self.recognize_count_in_slot(inventory_image, &slot_rois, slot).unwrap_or(0);
             results.insert(slot.to_string(), count);
-        }
-
-        #[cfg(debug_assertions)]
-        {
-            let t_end = std::time::Instant::now();
-            println!("    ✅ All slots processed in {}ms", (t_end - t_start).as_millis());
         }
 
         Ok(results)
@@ -690,9 +661,16 @@ impl InventoryTemplateMatcher {
 
     /// Get available slot names
     pub fn get_available_slots(&self) -> Vec<String> {
-        let mut slots: Vec<String> = self.slot_rois.keys().cloned().collect();
-        slots.sort();
-        slots
+        vec![
+            "shift".to_string(),
+            "ins".to_string(),
+            "home".to_string(),
+            "pup".to_string(),
+            "ctrl".to_string(),
+            "del".to_string(),
+            "end".to_string(),
+            "pdn".to_string(),
+        ]
     }
 }
 
@@ -701,13 +679,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_slot_rois_initialized() {
-        let matcher = InventoryTemplateMatcher::new();
-        assert_eq!(matcher.slot_rois.len(), 8);
+    fn test_slot_rois_calculation() {
+        // Test with reference size 522x255
+        let slot_rois = InventoryTemplateMatcher::calculate_slot_rois(522, 255);
+        assert_eq!(slot_rois.len(), 8);
 
         // Test specific slots
-        assert!(matcher.slot_rois.contains_key("shift"));
-        assert!(matcher.slot_rois.contains_key("pdn"));
+        assert!(slot_rois.contains_key("shift"));
+        assert!(slot_rois.contains_key("pdn"));
     }
 
     #[test]
