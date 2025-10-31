@@ -32,7 +32,7 @@ interface CompactRoiManagerProps {
 }
 
 const ROI_CONFIGS = [
-  { type: 'level' as RoiType, label: '레벨', icon: lvIcon, color: '#4CAF50', autoDetect: false },
+  { type: 'level' as RoiType, label: '레벨', icon: lvIcon, color: '#4CAF50', autoDetect: true },
   { type: 'exp' as RoiType, label: '경험치', icon: expIcon, color: '#2196F3', autoDetect: false },
   { type: 'inventory' as RoiType, label: '포션', icon: [hpIcon, mpIcon], color: '#FF5722', autoDetect: true },
   // { type: 'mapLocation' as RoiType, label: 'Map', icon: '🗺️', color: '#9C27B0' }, // Commented out temporarily
@@ -132,11 +132,22 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
 
   const handleViewPreview = async (type: RoiType) => {
     try {
-      const imageData = await invoke<string>('get_roi_preview', { roiType: type });
-      setPreviewImage(imageData);
+      // Get the ROI configuration for this type
+      const roi = getRoi(type);
+
+      if (!roi) {
+        console.error('No ROI configured for type:', type);
+        return;
+      }
+
+      // Capture the region in real-time
+      const bytes = await captureRegion(roi);
+      const dataUrl = bytesToDataUrl(bytes);
+
+      setPreviewImage(dataUrl);
       setPreviewRoiType(type);
     } catch (err) {
-      console.error('Failed to load preview:', err);
+      console.error('Failed to capture preview:', err);
     }
   };
 
