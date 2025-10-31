@@ -107,11 +107,11 @@ impl TemplateMatcher {
                     let pixel = rgb_image.get_pixel(x, y);
                     let (h, s, v) = rgb_to_hsv(pixel[0], pixel[1], pixel[2]);
 
-                    // Check if pixel is in wider orange range
-                    // H[0-40]: broader orange/red spectrum
-                    // S[100-255]: include lighter/desaturated oranges
-                    // V[120-255]: include darker oranges
-                    if h >= 0.0 && h <= 40.0 && s >= 100.0 && v >= 120.0 {
+                    // Orange color range (matching Python OpenCV)
+                    // H[8-28]: orange hue range
+                    // S[180-255]: high saturation
+                    // V[180-255]: high brightness
+                    if h >= 8.0 && h <= 28.0 && s >= 180.0 && v >= 180.0 {
                         row_data.push(255u8);
                     } else {
                         row_data.push(0u8);
