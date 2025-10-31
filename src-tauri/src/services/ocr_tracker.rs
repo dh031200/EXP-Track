@@ -524,12 +524,16 @@ impl OcrTracker {
                                         Ok(results) => {
                                             // Try to get ROI coordinates for memoization
                                             if let Some(matcher) = &service.inventory_matcher {
-                                                if let Ok((inv_image, coords)) = matcher.detect_inventory_region_with_coords(&*image) {
+                                                if let Ok((_, coords)) = matcher.detect_inventory_region_with_coords(&*image) {
                                                     #[cfg(debug_assertions)]
                                                     println!("💾 Memoizing Inventory ROI: {:?}", coords);
                                                     
-                                                    // Save inventory preview image
-                                                    save_inventory_preview(&inv_image);
+                                                    // Save original inventory preview image (not processed)
+                                                    let (left, top, right, bottom) = coords;
+                                                    let width = right - left + 1;
+                                                    let height = bottom - top + 1;
+                                                    let cropped_original = image::imageops::crop_imm(&*image, left, top, width, height).to_image();
+                                                    save_inventory_preview(&DynamicImage::ImageRgb8(cropped_original));
                                                     
                                                     return Ok((results, Some(coords)));
                                                 }
