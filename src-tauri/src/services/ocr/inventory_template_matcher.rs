@@ -140,7 +140,7 @@ impl InventoryTemplateMatcher {
 
     /// Detect inventory region from full screenshot with debug info
     /// Returns (inventory_image, (left, top, right, bottom))
-    /// Note: Returns original-size inventory region (no resize) for better quality
+    /// Note: Resizes to standard 522x255 for consistent template matching
     pub fn detect_inventory_region_with_coords(&self, image: &DynamicImage) -> Result<(DynamicImage, (u32, u32, u32, u32)), String> {
         // Step 1: Convert to grayscale
         let gray = image.to_luma8();
@@ -180,11 +180,20 @@ impl InventoryTemplateMatcher {
         // Step 5: Crop inventory region from original grayscale
         let cropped_gray = imageops::crop_imm(&gray, *left, *top, inv_width, inv_height).to_image();
 
-        // Step 6: Final threshold for OCR (threshold 1)
+        // Step 6: Resize to standard 522x255 for consistent template matching
+        // NEAREST preserves sharp edges for better digit recognition
+        let resized_gray = image::imageops::resize(
+            &cropped_gray,
+            522,
+            255,
+            image::imageops::FilterType::Nearest,
+        );
+
+        // Step 7: Final threshold for OCR (threshold 1)
         // Dark pixels (< 1) become white (255) - digits
         // Bright pixels (≥ 1) become black (0) - background
-        let final_binary = ImageBuffer::from_fn(inv_width, inv_height, |x, y| {
-            let pixel = cropped_gray.get_pixel(x, y);
+        let final_binary = ImageBuffer::from_fn(522, 255, |x, y| {
+            let pixel = resized_gray.get_pixel(x, y);
             if pixel[0] < 1 {
                 Luma([255u8])  // Dark pixels → white
             } else {
@@ -196,7 +205,7 @@ impl InventoryTemplateMatcher {
     }
 
     /// Detect inventory region from full screenshot
-    /// Returns original-size inventory image (no resize)
+    /// Returns 522x255 standardized inventory image
     pub fn detect_inventory_region(&self, image: &DynamicImage) -> Result<DynamicImage, String> {
         let (inventory_image, _coords) = self.detect_inventory_region_with_coords(image)?;
         Ok(inventory_image)
@@ -374,10 +383,9 @@ impl InventoryTemplateMatcher {
     /// Recognize counts in all 8 inventory slots
     /// Returns HashMap with slot names as keys and item counts as values
     pub fn recognize_all_slots(&self, inventory_image: &DynamicImage) -> Result<HashMap<String, u32>, String> {
-        // Calculate slot ROIs dynamically based on actual inventory size
-        let width = inventory_image.width();
-        let height = inventory_image.height();
-        let slot_rois = Self::calculate_slot_rois(width, height);
+        // Inventory image is always 522x255 after standardization
+        // Calculate slot ROIs dynamically based on this standard size
+        let slot_rois = Self::calculate_slot_rois(522, 255);
 
         let mut results = HashMap::new();
         let slots = vec!["shift", "ins", "home", "pup", "ctrl", "del", "end", "pdn"];
