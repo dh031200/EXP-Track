@@ -60,6 +60,7 @@ function App() {
     state: trackingState,
     elapsedSeconds,
     pausedSeconds,
+    sessionStartTime,
     startTracking,
     pauseTracking,
     resetTracking,
@@ -951,10 +952,10 @@ function App() {
                     color: '#999',
                     textAlign: 'center'
                   }}>
-                    {targetDuration > 0 && trackingState === 'tracking' ? (
+                    {targetDuration > 0 && trackingState === 'tracking' && sessionStartTime ? (
                       (() => {
-                        const now = new Date();
-                        const targetTime = new Date(now.getTime() + (targetDuration * 60 - elapsedSeconds) * 1000);
+                        // Calculate target completion time based on session start time
+                        const targetTime = new Date(sessionStartTime + targetDuration * 60 * 1000);
                         const hours = Math.floor(targetDuration / 60);
                         const minutes = targetDuration % 60;
                         
