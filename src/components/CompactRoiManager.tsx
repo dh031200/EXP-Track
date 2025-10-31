@@ -7,6 +7,7 @@ import {
   maximizeWindowForROI,
   restoreWindow,
   initScreenCapture,
+  autoDetectRois,
   setAlwaysOnTop,
   type Roi,
 } from '../lib/tauri';

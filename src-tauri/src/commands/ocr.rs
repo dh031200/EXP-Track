@@ -345,10 +345,77 @@ pub async fn check_ocr_health(state: State<'_, OcrServiceState>) -> Result<bool,
         let service = state.inner().lock();
         service.http_client.clone()
     };
-    
+
     match http_client.health_check().await {
         Ok(_) => Ok(true),
         Err(_) => Ok(false),
     }
+}
+
+use serde::Serialize;
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AutoDetectResult {
+    pub level: Option<crate::models::roi::Roi>,
+    pub inventory: Option<crate::models::roi::Roi>,
+}
+
+/// Tauri command: Auto-detect Level and Inventory ROIs from full screen
+#[tauri::command]
+pub async fn auto_detect_rois(
+    ocr_state: State<'_, OcrServiceState>,
+    screen_state: State<'_, crate::commands::screen_capture::ScreenCaptureState>,
+) -> Result<AutoDetectResult, String> {
+    // Step 1: Capture full screen
+    let image_bytes = {
+        let state_guard = screen_state.inner().lock()
+            .map_err(|e| format!("Failed to lock screen state: {}", e))?;
+        let capture = state_guard.as_ref()
+            .ok_or("Screen capture not initialized")?;
+
+        let image = capture.capture_full()?;
+        crate::services::screen_capture::ScreenCapture::image_to_png_bytes(&image)?
+    };
+
+    // Convert bytes to DynamicImage
+    let image = image::load_from_memory(&image_bytes)
+        .map_err(|e| format!("Failed to load image: {}", e))?;
+
+    let mut result = AutoDetectResult {
+        level: None,
+        inventory: None,
+    };
+
+    // Step 2: Detect Level ROI
+    {
+        let service = ocr_state.inner().lock();
+        if let Ok(coords) = service.http_client.detect_level_roi(&image) {
+            let (left, top, right, bottom) = coords;
+            result.level = Some(crate::models::roi::Roi::new(
+                left,
+                top,
+                right - left + 1,
+                bottom - top + 1,
+            ));
+        }
+    }
+
+    // Step 3: Detect Inventory ROI
+    {
+        let service = ocr_state.inner().lock();
+        if let Some(matcher) = &service.inventory_matcher {
+            if let Ok((_, coords)) = matcher.detect_inventory_region_with_coords(&image) {
+                let (left, top, right, bottom) = coords;
+                result.inventory = Some(crate::models::roi::Roi::new(
+                    left,
+                    top,
+                    right - left + 1,
+                    bottom - top + 1,
+                ));
+            }
+        }
+    }
+
+    Ok(result)
 }
 

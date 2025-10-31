@@ -15,11 +15,23 @@ interface WindowState {
   y: number;
 }
 
+export interface AutoDetectResult {
+  level: Roi | null;
+  inventory: Roi | null;
+}
+
 /**
  * Initialize screen capture with the primary monitor
  */
 export async function initScreenCapture(): Promise<void> {
   return invoke('init_screen_capture');
+}
+
+/**
+ * Auto-detect Level and Inventory ROIs from full screen capture
+ */
+export async function autoDetectRois(): Promise<AutoDetectResult> {
+  return invoke('auto_detect_rois');
 }
 
 /**

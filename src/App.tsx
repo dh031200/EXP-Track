@@ -12,7 +12,7 @@ import { useSessionStore } from "./stores/sessionStore";
 import { useTimerSettingsStore } from "./stores/timerSettingsStore";
 import { useMesoStore } from "./stores/mesoStore";
 import { useParallelOcrTracker } from "./hooks/useParallelOcrTracker";
-import { initScreenCapture } from "./lib/tauri";
+import { initScreenCapture, autoDetectRois } from "./lib/tauri";
 import { checkOcrHealth } from "./lib/ocrCommands";
 import { formatCompact, formatKoreanNumber } from "./lib/expCommands";
 import "./App.css";
@@ -51,6 +51,7 @@ function App() {
     mpPotions: number;
   }>>([]);
   const [ocrHealthy, setOcrHealthy] = useState(false);
+  const [autoDetectCompleted, setAutoDetectCompleted] = useState(false);
 
   const backgroundOpacity = useSettingsStore((state) => state.backgroundOpacity);
   const targetDuration = useSettingsStore((state) => state.targetDuration);
@@ -148,6 +149,53 @@ function App() {
 
     return () => clearInterval(interval);
   }, [ocrHealthy]);
+
+  // Auto-detect ROIs once OCR is healthy (one-time on app start)
+  useEffect(() => {
+    if (!ocrHealthy || autoDetectCompleted) return;
+
+    const performAutoDetect = async () => {
+      let attempts = 0;
+      let detected = false;
+
+      while (attempts < 3 && !detected) {
+        attempts++;
+        try {
+          console.log(`Auto-detecting ROIs (attempt ${attempts}/3)...`);
+          const result = await autoDetectRois();
+
+          // Save detected ROIs
+          const { setRoi } = useRoiStore.getState();
+
+          if (result.level) {
+            await setRoi('level', result.level);
+            console.log('✅ Level ROI auto-detected and saved');
+          }
+
+          if (result.inventory) {
+            await setRoi('inventory', result.inventory);
+            console.log('✅ Inventory ROI auto-detected and saved');
+          }
+
+          // Consider successful if at least one ROI was detected
+          if (result.level || result.inventory) {
+            detected = true;
+            console.log('✅ Auto-detect completed successfully');
+          }
+        } catch (err) {
+          console.error(`Auto-detect attempt ${attempts} failed:`, err);
+        }
+      }
+
+      if (!detected) {
+        console.warn('⚠️ Failed to auto-detect ROIs after 3 attempts');
+      }
+
+      setAutoDetectCompleted(true);
+    };
+
+    performAutoDetect();
+  }, [ocrHealthy, autoDetectCompleted]);
 
   // Timer effect - increment every second when tracking
   useEffect(() => {
