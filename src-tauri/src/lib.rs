@@ -28,7 +28,7 @@ use commands::tracking::{
 };
 use commands::session::{
     get_session_records, save_session_record, delete_session_record, update_session_title,
-    init_session_records, SessionRecordsState,
+    init_session_records,
 };
 use services::exp_calculator::ExpCalculator;
 use services::python_server::PythonServerManager;

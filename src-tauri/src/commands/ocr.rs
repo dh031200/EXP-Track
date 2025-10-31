@@ -392,8 +392,8 @@ pub async fn auto_detect_rois(
         if let Ok(coords) = service.http_client.detect_level_roi(&image) {
             let (left, top, right, bottom) = coords;
             result.level = Some(crate::models::roi::Roi::new(
-                left,
-                top,
+                left as i32,
+                top as i32,
                 right - left + 1,
                 bottom - top + 1,
             ));
@@ -407,8 +407,8 @@ pub async fn auto_detect_rois(
             if let Ok((_, coords)) = matcher.detect_inventory_region_with_coords(&image) {
                 let (left, top, right, bottom) = coords;
                 result.inventory = Some(crate::models::roi::Roi::new(
-                    left,
-                    top,
+                    left as i32,
+                    top as i32,
                     right - left + 1,
                     bottom - top + 1,
                 ));

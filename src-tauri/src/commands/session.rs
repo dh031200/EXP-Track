@@ -34,7 +34,7 @@ pub fn init_session_records() -> SessionRecordsState {
 }
 
 fn create_dummy_sessions() -> Vec<SessionRecord> {
-    use chrono::{Utc, Duration, TimeZone};
+    use chrono::{Utc, Duration};
     
     let now = Utc::now();
     
