@@ -409,8 +409,8 @@ impl InventoryTemplateMatcher {
         Ok(results)
     }
 
-    /// Detect all digits in ROI using multi-scale template matching
-    /// Each digit is matched at multiple scales (0.6x-1.3x), keeping highest similarity per position
+    /// Detect all digits in ROI using height-based template matching
+    /// Templates are resized to match ROI height, then slide horizontally only
     fn detect_digits_in_roi(&self, gray: &GrayImage, roi: &SlotRoi, slot_name: &str) -> Result<Vec<DigitDetection>, String> {
         // Extract ROI
         let roi_image = image::imageops::crop_imm(
@@ -421,74 +421,67 @@ impl InventoryTemplateMatcher {
             roi.height,
         ).to_image();
 
-        // Multi-scale matching (0.6x - 1.3x, 8 scales)
-        let scales = vec![0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3];
+        let roi_height = roi.height;
         let threshold = 0.7;
 
         use rayon::prelude::*;
 
-        // Generate all (template, scale) combinations
-        let combinations: Vec<_> = self.templates.iter()
-            .flat_map(|t| scales.iter().map(move |&s| (t, s)))
-            .collect();
+        // Parallel matching: each template resized to ROI height
+        let all_detections: Vec<DigitDetection> = self.templates.par_iter()
+            .flat_map(|template| {
+                let (tmpl_width, tmpl_height) = template.image.dimensions();
 
-        // Parallel matching: each (digit, scale) combination tested independently
-        // NMS will select highest similarity per position across all scales
-        let all_detections: Vec<DigitDetection> = combinations.par_iter()
-            .flat_map(|(template, scale)| {
-                // Resize template to current scale
-                let scaled_width = (template.image.width() as f32 * *scale) as u32;
-                let scaled_height = (template.image.height() as f32 * *scale) as u32;
+                // Resize template to match ROI height (maintain aspect ratio)
+                let scale_factor = roi_height as f32 / tmpl_height as f32;
+                let scaled_width = (tmpl_width as f32 * scale_factor) as u32;
 
-                if scaled_width > roi.width || scaled_height > roi.height {
-                    return Vec::new();
+                if scaled_width > roi.width {
+                    return Vec::new(); // Template too wide after height adjustment
                 }
 
-                let scaled_template = image::imageops::resize(
+                let height_matched_template = image::imageops::resize(
                     &template.image,
                     scaled_width,
-                    scaled_height,
+                    roi_height,
                     image::imageops::FilterType::Lanczos3,
                 );
 
-                // Template matching at current scale
-                let matches = self.match_template(&roi_image, &scaled_template, threshold);
+                // Horizontal-only sliding window (y=0 fixed)
+                let matches = self.match_template_horizontal(&roi_image, &height_matched_template, threshold);
 
                 // Debug: Print all attempts (matches and non-matches)
                 #[cfg(debug_assertions)]
                 {
                     if !matches.is_empty() {
                         let max_score = matches.iter().map(|(_, _, s)| s).fold(0.0f32, |a, &b| a.max(b));
-                        println!("      ✅ digit={}, scale={:.1}x, template={}: {} matches (max_score={:.3})",
+                        println!("      ✅ digit={}, template={}: {} matches (max_score={:.3})",
                             template.digit,
-                            scale,
                             template.name,
                             matches.len(),
                             max_score
                         );
 
                         // Save debug image for this template
-                        self.save_debug_image(&roi_image, &template.name, &scaled_template, &matches, slot_name);
+                        self.save_debug_image(&roi_image, &template.name, &height_matched_template, &matches, slot_name);
                     } else {
-                        println!("      ❌ digit={}, scale={:.1}x, template={}: no matches (threshold={})",
+                        println!("      ❌ digit={}, template={}: no matches (threshold={})",
                             template.digit,
-                            scale,
                             template.name,
                             threshold
                         );
                     }
                 }
 
-                // Convert to DigitDetection with scale info
+                // Convert to DigitDetection
                 matches.into_iter().map(|(x, y, score)| {
                     DigitDetection {
                         digit: template.digit,
                         x: x + roi.x,
                         y: y + roi.y,
                         width: scaled_width,
-                        height: scaled_height,
+                        height: roi_height,
                         score,
-                        scale: *scale,
+                        scale: scale_factor,
                     }
                 }).collect()
             })
@@ -504,6 +497,29 @@ impl InventoryTemplateMatcher {
         let final_detections = self.remove_duplicates(height_filtered, 5)?;
 
         Ok(final_detections)
+    }
+
+    /// Horizontal-only template matching (y=0 fixed, x slides)
+    /// Template height must match image height
+    fn match_template_horizontal(&self, image: &GrayImage, template: &GrayImage, threshold: f32) -> Vec<(u32, u32, f32)> {
+        let (img_width, img_height) = image.dimensions();
+        let (tmpl_width, tmpl_height) = template.dimensions();
+
+        if tmpl_width > img_width || tmpl_height != img_height {
+            return Vec::new();
+        }
+
+        let mut matches = Vec::new();
+
+        // Slide horizontally only (y=0)
+        for x in 0..=(img_width - tmpl_width) {
+            let score = self.calculate_ncc(image, template, x, 0);
+            if score >= threshold {
+                matches.push((x, 0, score));
+            }
+        }
+
+        matches
     }
 
     /// Template matching using exact pixel matching for binary images
