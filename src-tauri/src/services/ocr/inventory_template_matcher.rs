@@ -421,6 +421,25 @@ impl InventoryTemplateMatcher {
             roi.height,
         ).to_image();
 
+        // Tight crop: find bounding box of white pixels (digits)
+        let tight_bbox = self.find_content_bbox(&roi_image);
+
+        #[cfg(debug_assertions)]
+        if let Some((crop_x, crop_y, crop_w, crop_h)) = tight_bbox {
+            println!("      📐 Tight crop: ({}, {}) {}×{} -> ({}, {}) {}×{}",
+                0, 0, roi.width, roi.height,
+                crop_x, crop_y, crop_w, crop_h
+            );
+        }
+
+        // Use tight cropped region if found, otherwise use original
+        let (roi_image, offset_x, offset_y) = if let Some((crop_x, crop_y, crop_w, crop_h)) = tight_bbox {
+            let cropped = image::imageops::crop_imm(&roi_image, crop_x, crop_y, crop_w, crop_h).to_image();
+            (cropped, crop_x, crop_y)
+        } else {
+            (roi_image, 0, 0)
+        };
+
         // Single scale matching (1.0x only)
         let scales = vec![1.0];
         let threshold = 0.7;
@@ -476,12 +495,12 @@ impl InventoryTemplateMatcher {
                     }
                 }
 
-                // Convert to DigitDetection with scale info
+                // Convert to DigitDetection with scale info (apply offset for tight crop)
                 matches.into_iter().map(|(x, y, score)| {
                     DigitDetection {
                         digit: template.digit,
-                        x: x + roi.x,
-                        y: y + roi.y,
+                        x: x + offset_x + roi.x,  // Apply tight crop offset
+                        y: y + offset_y + roi.y,  // Apply tight crop offset
                         width: scaled_width,
                         height: scaled_height,
                         score,
@@ -524,6 +543,44 @@ impl InventoryTemplateMatcher {
         }
 
         matches
+    }
+
+    /// Find tight bounding box of white pixels (content) in image
+    /// Returns (x, y, width, height) or None if no white pixels found
+    fn find_content_bbox(&self, image: &GrayImage) -> Option<(u32, u32, u32, u32)> {
+        let (width, height) = image.dimensions();
+
+        let mut min_x = width;
+        let mut max_x = 0;
+        let mut min_y = height;
+        let mut max_y = 0;
+        let mut found_white = false;
+
+        // Find bounding box of white pixels (value > 128)
+        for y in 0..height {
+            for x in 0..width {
+                if image.get_pixel(x, y)[0] > 128 {
+                    found_white = true;
+                    min_x = min_x.min(x);
+                    max_x = max_x.max(x);
+                    min_y = min_y.min(y);
+                    max_y = max_y.max(y);
+                }
+            }
+        }
+
+        if !found_white {
+            return None;
+        }
+
+        // Add small padding (2 pixels on each side)
+        let padding = 2;
+        let crop_x = min_x.saturating_sub(padding);
+        let crop_y = min_y.saturating_sub(padding);
+        let crop_w = ((max_x + padding + 1).min(width) - crop_x).max(1);
+        let crop_h = ((max_y + padding + 1).min(height) - crop_y).max(1);
+
+        Some((crop_x, crop_y, crop_w, crop_h))
     }
 
     /// Calculate binary image similarity using exact pixel matching
