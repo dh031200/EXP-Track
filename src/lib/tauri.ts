@@ -8,6 +8,13 @@ export interface Roi {
   height: number;
 }
 
+export interface LevelBoxCoords {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 interface WindowState {
   width: number;
   height: number;
@@ -17,6 +24,7 @@ interface WindowState {
 
 export interface AutoDetectResult {
   level: Roi | null;
+  level_boxes: LevelBoxCoords[] | null;
   inventory: Roi | null;
 }
 

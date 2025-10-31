@@ -115,35 +115,38 @@ impl HttpOcrClient {
         Ok(())
     }
 
-    /// Detect Level ROI by finding orange digit boxes
-    /// Returns (left, top, right, bottom) coordinates of the bounding box
-    pub fn detect_level_roi(&self, image: &DynamicImage) -> Result<(u32, u32, u32, u32), String> {
+    /// Detect Level ROI by recognizing level digits
+    /// Returns (left, top, right, bottom, matched_boxes) where matched_boxes are successfully recognized digit boxes
+    pub fn detect_level_roi_with_boxes(&self, image: &DynamicImage) -> Result<(u32, u32, u32, u32, Vec<super::template_matcher::BoundingBox>), String> {
         let matcher = self.template_matcher.as_ref()
             .ok_or("Template matcher not initialized")?;
 
-        // Extract orange boxes
-        let mask = matcher.extract_orange_boxes(image)?;
+        // Recognize level and get matched boxes
+        let (_level, matched_boxes) = matcher.recognize_level_with_boxes(image)?;
 
-        // Find digit boxes
-        let boxes = matcher.find_digit_boxes(&mask)?;
-
-        if boxes.is_empty() {
-            return Err("No digit boxes found for ROI detection".to_string());
+        if matched_boxes.is_empty() {
+            return Err("No digit boxes matched for ROI detection".to_string());
         }
 
-        // Compute overall bounding box
-        let min_x = boxes.iter().map(|b| b.x).min().unwrap();
-        let min_y = boxes.iter().map(|b| b.y).min().unwrap();
-        let max_x = boxes.iter().map(|b| b.x + b.width).max().unwrap();
-        let max_y = boxes.iter().map(|b| b.y + b.height).max().unwrap();
+        // Compute overall bounding box from matched boxes only
+        let min_x = matched_boxes.iter().map(|b| b.x).min().unwrap();
+        let min_y = matched_boxes.iter().map(|b| b.y).min().unwrap();
+        let max_x = matched_boxes.iter().map(|b| b.x + b.width).max().unwrap();
+        let max_y = matched_boxes.iter().map(|b| b.y + b.height).max().unwrap();
 
-        // Add padding (20 pixels on each side)
-        let padding = 20;
+        // Add padding (10 pixels on each side)
+        let padding = 10;
         let left = min_x.saturating_sub(padding);
         let top = min_y.saturating_sub(padding);
         let right = (max_x + padding).min(image.width() - 1);
         let bottom = (max_y + padding).min(image.height() - 1);
 
+        Ok((left, top, right, bottom, matched_boxes))
+    }
+
+    /// Detect Level ROI (backward compatibility)
+    pub fn detect_level_roi(&self, image: &DynamicImage) -> Result<(u32, u32, u32, u32), String> {
+        let (left, top, right, bottom, _boxes) = self.detect_level_roi_with_boxes(image)?;
         Ok((left, top, right, bottom))
     }
 

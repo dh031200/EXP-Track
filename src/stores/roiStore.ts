@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { Roi } from '../lib/tauri';
+import type { Roi, LevelBoxCoords } from '../lib/tauri';
 import { saveRoi, loadRoi, clearRoi } from '../lib/roiCommands';
 
 export type RoiType = 'level' | 'exp' | 'hp' | 'mp' | 'inventory'; // | 'mapLocation' - commented out temporarily
@@ -8,6 +8,7 @@ export type RoiType = 'level' | 'exp' | 'hp' | 'mp' | 'inventory'; // | 'mapLoca
 interface RoiState {
   // Current ROI configurations
   levelRoi: Roi | null;
+  levelBoxes: LevelBoxCoords[] | null; // Matched digit box coordinates for level (1-3 boxes)
   expRoi: Roi | null;
   hpRoi: Roi | null;
   mpRoi: Roi | null;
@@ -20,7 +21,9 @@ interface RoiState {
 
   // Actions
   setRoi: (type: RoiType, roi: Roi) => Promise<void>;
+  setLevelWithBoxes: (roi: Roi, boxes: LevelBoxCoords[]) => Promise<void>;
   getRoi: (type: RoiType) => Roi | null;
+  getLevelBoxes: () => LevelBoxCoords[] | null;
   removeRoi: (type: RoiType) => Promise<void>;
   loadAllRois: () => Promise<void>;
   clearError: () => void;
@@ -31,6 +34,7 @@ export const useRoiStore = create<RoiState>()(
     (set, get) => ({
       // Initial state
       levelRoi: null,
+      levelBoxes: null,
       expRoi: null,
       hpRoi: null,
       mpRoi: null,
@@ -74,6 +78,22 @@ export const useRoiStore = create<RoiState>()(
         }
       },
 
+      // Set level ROI with matched box coordinates
+      setLevelWithBoxes: async (roi: Roi, boxes: LevelBoxCoords[]) => {
+        set({ isLoading: true, error: null });
+        try {
+          // Save ROI to backend
+          await saveRoi('level', roi);
+
+          // Update local state with both ROI and boxes
+          set({ levelRoi: roi, levelBoxes: boxes, isLoading: false });
+        } catch (err) {
+          const error = err instanceof Error ? err.message : 'Failed to save level ROI';
+          set({ error, isLoading: false });
+          throw new Error(error);
+        }
+      },
+
       // Get ROI from state
       getRoi: (type: RoiType) => {
         const state = get();
@@ -95,6 +115,11 @@ export const useRoiStore = create<RoiState>()(
         }
       },
 
+      // Get level box coordinates
+      getLevelBoxes: () => {
+        return get().levelBoxes;
+      },
+
       // Remove ROI
       removeRoi: async (type: RoiType) => {
         set({ isLoading: true, error: null });
@@ -105,7 +130,7 @@ export const useRoiStore = create<RoiState>()(
           // Update local state
           switch (type) {
             case 'level':
-              set({ levelRoi: null, isLoading: false });
+              set({ levelRoi: null, levelBoxes: null, isLoading: false });
               break;
             case 'exp':
               set({ expRoi: null, isLoading: false });
@@ -166,6 +191,7 @@ export const useRoiStore = create<RoiState>()(
       // Only persist the ROI data, not loading/error states
       partialize: (state) => ({
         levelRoi: state.levelRoi,
+        levelBoxes: state.levelBoxes,
         expRoi: state.expRoi,
         hpRoi: state.hpRoi,
         mpRoi: state.mpRoi,

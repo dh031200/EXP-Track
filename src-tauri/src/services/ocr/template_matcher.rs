@@ -268,8 +268,9 @@ impl TemplateMatcher {
         }))
     }
 
-    /// Recognize level number from image
-    pub fn recognize_level(&self, image: &DynamicImage) -> Result<u32, String> {
+    /// Recognize level number from image and return matched box coordinates
+    /// Returns (level, matched_boxes) where matched_boxes are the successfully recognized digit boxes
+    pub fn recognize_level_with_boxes(&self, image: &DynamicImage) -> Result<(u32, Vec<BoundingBox>), String> {
         // Debug: Save original image
         let debug_dir = std::env::temp_dir().join("exp-tracker-debug");
         std::fs::create_dir_all(&debug_dir).ok();
@@ -303,6 +304,7 @@ impl TemplateMatcher {
 
         // Match each digit
         let mut digits = Vec::new();
+        let mut matched_boxes = Vec::new(); // Track successfully matched boxes
 
         for (idx, bbox) in boxes.iter().enumerate() {
             // Extract box without padding
@@ -357,6 +359,7 @@ impl TemplateMatcher {
                     digit_match.position = (bbox.x, bbox.y);
                     println!("✅ Box {} matched: digit={}, similarity={:.2}%", idx, digit_match.digit, digit_match.similarity);
                     digits.push(digit_match.digit);
+                    matched_boxes.push(bbox.clone()); // Save successfully matched box
                 }
                 None => {
                     // Get best match even if below threshold
@@ -383,9 +386,15 @@ impl TemplateMatcher {
             return Err(format!("Invalid level range: {} (expected 1-300)", level));
         }
 
-        println!("🎯 Final recognized level: {}", level);
+        println!("🎯 Final recognized level: {} (matched {} boxes)", level, matched_boxes.len());
         println!("📂 Debug images saved to: {}", debug_dir.display());
 
+        Ok((level, matched_boxes))
+    }
+
+    /// Recognize level number from image (backward compatibility)
+    pub fn recognize_level(&self, image: &DynamicImage) -> Result<u32, String> {
+        let (level, _boxes) = self.recognize_level_with_boxes(image)?;
         Ok(level)
     }
 }

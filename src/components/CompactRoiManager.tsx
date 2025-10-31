@@ -48,7 +48,7 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
   const [previewRoiType, setPreviewRoiType] = useState<RoiType | null>(null);
   const windowStateRef = useRef<WindowState | null>(null);
 
-  const { levelRoi, expRoi, inventoryRoi, setRoi, removeRoi, loadAllRois } = useRoiStore();
+  const { levelRoi, expRoi, inventoryRoi, setRoi, removeRoi, loadAllRois, getLevelBoxes } = useRoiStore();
 
   useEffect(() => {
     const init = async () => {
@@ -143,8 +143,30 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
         return;
       }
 
+      // For level ROI, use matched box coordinates if available (like inventory)
+      let captureRoi = roi;
+      if (type === 'level') {
+        const levelBoxes = getLevelBoxes();
+        if (levelBoxes && levelBoxes.length > 0) {
+          // Calculate bounding box from all matched digit boxes
+          const minX = Math.min(...levelBoxes.map(b => b.x));
+          const minY = Math.min(...levelBoxes.map(b => b.y));
+          const maxX = Math.max(...levelBoxes.map(b => b.x + b.width));
+          const maxY = Math.max(...levelBoxes.map(b => b.y + b.height));
+
+          // Add padding (10 pixels on each side)
+          const padding = 10;
+          captureRoi = {
+            x: Math.max(0, minX - padding),
+            y: Math.max(0, minY - padding),
+            width: maxX - minX + padding * 2,
+            height: maxY - minY + padding * 2,
+          };
+        }
+      }
+
       // Capture the region in real-time
-      const bytes = await captureRegion(roi);
+      const bytes = await captureRegion(captureRoi);
       const dataUrl = bytesToDataUrl(bytes);
 
       setPreviewImage(dataUrl);

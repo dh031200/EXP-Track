@@ -355,8 +355,17 @@ pub async fn check_ocr_health(state: State<'_, OcrServiceState>) -> Result<bool,
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
+pub struct LevelBoxCoords {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct AutoDetectResult {
     pub level: Option<crate::models::roi::Roi>,
+    pub level_boxes: Option<Vec<LevelBoxCoords>>, // Matched digit box coordinates (1-3 boxes)
     pub inventory: Option<crate::models::roi::Roi>,
 }
 
@@ -383,20 +392,32 @@ pub async fn auto_detect_rois(
 
     let mut result = AutoDetectResult {
         level: None,
+        level_boxes: None,
         inventory: None,
     };
 
-    // Step 2: Detect Level ROI
+    // Step 2: Detect Level ROI with matched boxes
     {
         let service = ocr_state.inner().lock();
-        if let Ok(coords) = service.http_client.detect_level_roi(&image) {
-            let (left, top, right, bottom) = coords;
+        if let Ok((left, top, right, bottom, matched_boxes)) = service.http_client.detect_level_roi_with_boxes(&image) {
             result.level = Some(crate::models::roi::Roi::new(
                 left as i32,
                 top as i32,
                 right - left + 1,
                 bottom - top + 1,
             ));
+
+            // Convert matched boxes to serializable format
+            result.level_boxes = Some(
+                matched_boxes.iter().map(|b| LevelBoxCoords {
+                    x: b.x,
+                    y: b.y,
+                    width: b.width,
+                    height: b.height,
+                }).collect()
+            );
+
+            println!("✅ Level ROI detected with {} digit boxes", matched_boxes.len());
         }
     }
 

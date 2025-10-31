@@ -172,11 +172,17 @@ function App() {
           const result = await autoDetectRois();
 
           // Save detected ROIs
-          const { setRoi } = useRoiStore.getState();
+          const { setRoi, setLevelWithBoxes } = useRoiStore.getState();
 
           if (result.level) {
-            await setRoi('level', result.level);
-            console.log('✅ Level ROI auto-detected and saved');
+            // If level boxes are available, use setLevelWithBoxes to store both ROI and boxes
+            if (result.level_boxes && result.level_boxes.length > 0) {
+              await setLevelWithBoxes(result.level, result.level_boxes);
+              console.log(`✅ Level ROI auto-detected with ${result.level_boxes.length} digit boxes`);
+            } else {
+              await setRoi('level', result.level);
+              console.log('✅ Level ROI auto-detected and saved');
+            }
           }
 
           if (result.inventory) {
