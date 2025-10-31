@@ -36,6 +36,7 @@
   color: #1976D2;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  flex-shrink: 0;
 }
 
 .settings-item {
@@ -160,10 +161,21 @@
 .settings-help {
   margin-top: 12px;
   margin-bottom: 0;
-  font-size: 12px;
+  font-size: 11px;
   color: #757575;
   line-height: 1.5;
   padding-left: 4px;
+}
+
+.settings-error {
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: #D32F2F;
+  background: #FFEBEE;
+  border: 1px solid #FFCDD2;
+  border-radius: 8px;
+  font-weight: 500;
 }
 
 /* Duration Select Dropdown */
@@ -192,6 +204,101 @@
 
 .duration-select option {
   padding: 8px;
+}
+
+.potion-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.potion-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-header-with-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.settings-header-with-error h3 {
+  margin: 0;
+}
+
+.potion-error-inline {
+  flex: 1;
+  display: flex;
+  justify-content: flex-end;
+  min-height: 24px;
+}
+
+.settings-error-inline {
+  padding: 2px 8px;
+  font-size: 10px;
+  color: #D32F2F;
+  background: #FFEBEE;
+  border: 1px solid #FFCDD2;
+  border-radius: 6px;
+  font-weight: 600;
+  white-space: nowrap;
+  animation: fadeIn 0.2s ease-in;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.keyboard-slot-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.keyboard-slot-wrapper {
+  position: relative;
+  width: 100%;
+  max-width: 400px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.keyboard-slot-image {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.potion-overlay-icon {
+  position: absolute;
+  width: 40px;
+  height: 40px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.4));
+  z-index: 10;
+}
+
+.keyboard-slot-instructions {
+  width: 100%;
+  max-width: 400px;
+  background: rgba(33, 150, 243, 0.05);
+  border: 1px solid rgba(33, 150, 243, 0.15);
+  border-radius: 8px;
+  padding: 12px 16px;
 }
 
 .settings-actions {

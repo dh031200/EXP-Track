@@ -9,10 +9,11 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use commands::config::{
     clear_roi, get_all_rois, get_config_path, init_config_manager, load_config, load_roi,
     get_roi_preview, open_roi_preview, save_config, save_roi, save_roi_preview,
+    get_potion_slot_config, set_potion_slot_config,
 };
 use commands::ocr::{
     init_ocr_service, recognize_all_parallel, recognize_exp, recognize_hp_potion_count, recognize_level,
-    check_ocr_health,
+    check_ocr_health, auto_detect_rois,
     recognize_map, recognize_mp_potion_count,
 };
 use commands::screen_capture::{
@@ -24,6 +25,10 @@ use commands::exp::{
 };
 use commands::tracking::{
     get_tracking_stats, reset_tracking, start_ocr_tracking, stop_ocr_tracking, TrackerState,
+};
+use commands::session::{
+    get_session_records, save_session_record, delete_session_record, update_session_title,
+    init_session_records,
 };
 use services::exp_calculator::ExpCalculator;
 use services::python_server::PythonServerManager;
@@ -51,17 +56,21 @@ pub fn run() {
     // Initialize Python server manager
     let python_server = AsyncMutex::new(PythonServerManager::new());
 
+    // Initialize session records
+    let session_records = init_session_records();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(ScreenCaptureState::default())
         .manage(config_manager)
-        .manage(ocr_service)
+        .manage(ocr_service.clone())  // Clone for .manage()
         .manage(exp_calculator_state)
         .manage(python_server)
-        .setup(|app| {
+        .manage(session_records)
+        .setup(move |app| {  // Move closure to capture ocr_service
             // Initialize OCR Tracker with AppHandle
-            let tracker_state = TrackerState::new(app.handle().clone())
+            let tracker_state = TrackerState::new(app.handle().clone(), ocr_service.clone())
                 .expect("Failed to initialize OCR tracker");
             app.manage(tracker_state);
 
@@ -151,6 +160,8 @@ pub fn run() {
             save_config,
             load_config,
             get_config_path,
+            get_potion_slot_config,
+            set_potion_slot_config,
             save_roi_preview,
             get_roi_preview,
             open_roi_preview,
@@ -161,13 +172,18 @@ pub fn run() {
             recognize_mp_potion_count,
             recognize_all_parallel,
             check_ocr_health,
+            auto_detect_rois,
             start_exp_session,
             add_exp_data,
             reset_exp_session,
             start_ocr_tracking,
             stop_ocr_tracking,
             get_tracking_stats,
-            reset_tracking
+            reset_tracking,
+            get_session_records,
+            save_session_record,
+            delete_session_record,
+            update_session_title
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

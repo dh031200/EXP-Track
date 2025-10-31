@@ -12,9 +12,9 @@ import { useSessionStore } from "./stores/sessionStore";
 import { useTimerSettingsStore } from "./stores/timerSettingsStore";
 import { useMesoStore } from "./stores/mesoStore";
 import { useParallelOcrTracker } from "./hooks/useParallelOcrTracker";
-import { initScreenCapture } from "./lib/tauri";
+import { initScreenCapture, autoDetectRois } from "./lib/tauri";
 import { checkOcrHealth } from "./lib/ocrCommands";
-import { formatCompact } from "./lib/expCommands";
+import { formatCompact, formatKoreanNumber } from "./lib/expCommands";
 import "./App.css";
 
 // Import icons
@@ -27,6 +27,8 @@ import historyIcon from "/icons/history.png";
 import timerIcon from "/icons/timer.png";
 import hpIcon from "/icons/hp.png";
 import mpIcon from "/icons/mp.png";
+import mesoIcon from "/icons/meso.png";
+import { SessionArchive } from './components/SessionArchive';
 
 function App() {
   const [isSelecting, setIsSelecting] = useState(false);
@@ -34,6 +36,7 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showTimerSettings, setShowTimerSettings] = useState(false);
   const [showMesoModal, setShowMesoModal] = useState(false);
+  const [showSessionArchive, setShowSessionArchive] = useState(false);
   const [mesoInputStart, setMesoInputStart] = useState('');
   const [mesoInputEnd, setMesoInputEnd] = useState('');
   const [potionPriceInputHp, setPotionPriceInputHp] = useState('');
@@ -48,6 +51,7 @@ function App() {
     mpPotions: number;
   }>>([]);
   const [ocrHealthy, setOcrHealthy] = useState(false);
+  const [autoDetectCompleted, setAutoDetectCompleted] = useState(false);
 
   const backgroundOpacity = useSettingsStore((state) => state.backgroundOpacity);
   const targetDuration = useSettingsStore((state) => state.targetDuration);
@@ -56,10 +60,13 @@ function App() {
     state: trackingState,
     elapsedSeconds,
     pausedSeconds,
+    sessionStartTime,
+    startPercentage,
     startTracking,
     pauseTracking,
     resetTracking,
     incrementTimer,
+    setStartPercentage,
   } = useTrackingStore();
 
   const {
@@ -92,14 +99,18 @@ function App() {
   // Check if any ROI is configured
   const hasAnyRoi = levelRoi !== null || expRoi !== null;
 
+  // Screen capture initialization state
+  const [screenCaptureReady, setScreenCaptureReady] = useState(false);
+
   // Initialize screen capture on app start
   useEffect(() => {
     const initCapture = async () => {
       try {
         await initScreenCapture();
-        console.log('Screen capture initialized successfully');
+        console.log('✅ Screen capture initialized successfully');
+        setScreenCaptureReady(true);
       } catch (error) {
-        console.error('Failed to initialize screen capture:', error);
+        console.error('❌ Failed to initialize screen capture:', error);
       }
     };
 
@@ -145,6 +156,62 @@ function App() {
 
     return () => clearInterval(interval);
   }, [ocrHealthy]);
+
+  // Auto-detect ROIs once everything is ready (one-time on app start)
+  useEffect(() => {
+    // Wait for both screen capture and OCR to be ready
+    if (!screenCaptureReady || !ocrHealthy || autoDetectCompleted) return;
+
+    console.log('🚀 All systems ready, starting auto-detect...');
+
+    const performAutoDetect = async () => {
+      let attempts = 0;
+      let detected = false;
+
+      while (attempts < 3 && !detected) {
+        attempts++;
+        try {
+          console.log(`Auto-detecting ROIs (attempt ${attempts}/3)...`);
+          const result = await autoDetectRois();
+
+          // Save detected ROIs
+          const { setRoi, setLevelWithBoxes } = useRoiStore.getState();
+
+          if (result.level) {
+            // If level boxes are available, use setLevelWithBoxes to store both ROI and boxes
+            if (result.level_boxes && result.level_boxes.length > 0) {
+              await setLevelWithBoxes(result.level, result.level_boxes);
+              console.log(`✅ Level ROI auto-detected with ${result.level_boxes.length} digit boxes`);
+            } else {
+              await setRoi('level', result.level);
+              console.log('✅ Level ROI auto-detected and saved');
+            }
+          }
+
+          if (result.inventory) {
+            await setRoi('inventory', result.inventory);
+            console.log('✅ Inventory ROI auto-detected and saved');
+          }
+
+          // Consider successful if at least one ROI was detected
+          if (result.level || result.inventory) {
+            detected = true;
+            console.log('✅ Auto-detect completed successfully');
+          }
+        } catch (err) {
+          console.error(`Auto-detect attempt ${attempts} failed:`, err);
+        }
+      }
+
+      if (!detected) {
+        console.warn('⚠️ Failed to auto-detect ROIs after 3 attempts');
+      }
+
+      setAutoDetectCompleted(true);
+    };
+
+    performAutoDetect();
+  }, [screenCaptureReady, ocrHealthy, autoDetectCompleted]);
 
   // Timer effect - increment every second when tracking
   useEffect(() => {
@@ -209,6 +276,13 @@ function App() {
       setExpDataPoints([]);
     }
   }, [trackingState]);
+
+  // Save starting percentage when tracking starts and first stats arrive
+  useEffect(() => {
+    if (trackingState === 'tracking' && startPercentage === null && parallelOcrTracker.stats?.percentage !== null && parallelOcrTracker.stats?.percentage !== undefined) {
+      setStartPercentage(parallelOcrTracker.stats.percentage);
+    }
+  }, [trackingState, startPercentage, parallelOcrTracker.stats?.percentage, setStartPercentage]);
 
   // Format elapsed seconds as HH:MM:SS
   const formatTime = (seconds: number): string => {
@@ -317,7 +391,7 @@ function App() {
   const calculateLevelUpETA = (): string => {
     const stats = parallelOcrTracker.stats;
     if (!stats || !stats.level || stats.exp_per_hour === 0) {
-      return '−';
+      return '?시간 ?분';
     }
 
     // Official Mapleland EXP table (Levels 1-200)
@@ -349,14 +423,14 @@ function App() {
     
     // Validate level range
     if (currentLevel < 1 || currentLevel >= 200) {
-      return '−';
+      return '?시간 ?분';
     }
     
     // Get required exp for next level
     const requiredExp = expTable[currentLevel];
     
     if (!requiredExp) {
-      return '−';
+      return '?시간 ?분';
     }
     
     // Calculate remaining exp to next level
@@ -366,7 +440,7 @@ function App() {
     const hoursNeeded = remainingExp / stats.exp_per_hour;
     
     if (hoursNeeded < 0 || !isFinite(hoursNeeded)) {
-      return '−';
+      return '?시간 ?분';
     }
     
     // Format as hours and minutes
@@ -413,7 +487,7 @@ function App() {
     
     const window = getCurrentWindow();
     await window.setResizable(true);
-    await window.setSize(new LogicalSize(510, 140));
+    await window.setSize(new LogicalSize(540, 130));
   };
 
   const handleOpenMesoModal = async () => {
@@ -435,7 +509,23 @@ function App() {
     
     const window = getCurrentWindow();
     await window.setResizable(true);
-    await window.setSize(new LogicalSize(510, 140));
+    await window.setSize(new LogicalSize(540, 130));
+  };
+
+  const handleOpenSessionArchive = async () => {
+    setShowSessionArchive(true);
+    
+    const window = getCurrentWindow();
+    await window.setResizable(false);
+    await window.setSize(new LogicalSize(540, 700));
+  };
+
+  const handleCloseSessionArchive = async () => {
+    setShowSessionArchive(false);
+    
+    const window = getCurrentWindow();
+    await window.setResizable(true);
+    await window.setSize(new LogicalSize(540, 130));
   };
 
   const handleMesoCalculate = () => {
@@ -566,7 +656,7 @@ function App() {
     setShowSettings(false);
     
     const window = getCurrentWindow();
-    await window.setSize(new LogicalSize(510, 140));
+    await window.setSize(new LogicalSize(540, 130));
   };
 
   const handleOpenHistory = async () => {
@@ -622,13 +712,13 @@ function App() {
           display: 'flex',
           flexDirection: 'column',
           position: 'relative',
-          cursor: (!isSelecting && !showSettings && !showMesoModal && !showRoiModal) ? 'move' : 'default',
+          cursor: (!isSelecting && !showSettings && !showMesoModal && !showRoiModal && !showSessionArchive) ? 'move' : 'default',
           pointerEvents: isSelecting ? 'none' : 'auto',
         }}
-        onMouseDown={!isSelecting && !showSettings && !showMesoModal && !showRoiModal ? handleDragStart : undefined}
+        onMouseDown={!isSelecting && !showSettings && !showMesoModal && !showRoiModal && !showSessionArchive ? handleDragStart : undefined}
       >
         {/* OCR Status - Left side of title bar */}
-        {!isSelecting && !showSettings && !showMesoModal && !showRoiModal && (
+        {!isSelecting && !showSettings && !showMesoModal && !showRoiModal && !showSessionArchive && (
           <div
             onMouseDown={(e) => e.stopPropagation()}
             style={{
@@ -656,7 +746,7 @@ function App() {
         )}
 
         {/* Window Controls are now positioned relative to this container */}
-        {!isSelecting && !showSettings && !showMesoModal && !showRoiModal && (
+        {!isSelecting && !showSettings && !showMesoModal && !showRoiModal && !showSessionArchive && (
           <div
             onMouseDown={(e) => e.stopPropagation()}
             style={{
@@ -734,15 +824,15 @@ function App() {
             style={{
               flex: 1,
               display: 'flex',
-              flexDirection: (showSettings || showMesoModal || showRoiModal) ? 'column' : 'row',
-              alignItems: (showSettings || showMesoModal || showRoiModal) ? 'stretch' : 'center',
-              padding: isSelecting ? '0' : (showSettings || showMesoModal || showRoiModal) ? '0' : '0 12px 8px 12px',
+              flexDirection: (showSettings || showMesoModal || showRoiModal || showSessionArchive) ? 'column' : 'row',
+              alignItems: (showSettings || showMesoModal || showRoiModal || showSessionArchive) ? 'stretch' : 'center',
+              padding: isSelecting ? '0' : (showSettings || showMesoModal || showRoiModal || showSessionArchive) ? '0' : '0 12px 8px 12px',
               gap: '4px',
-              userSelect: (showSettings || showMesoModal || showRoiModal) ? 'auto' : 'none',
-              overflow: (showSettings || showMesoModal || showRoiModal) ? 'auto' : 'hidden',
+              userSelect: (showSettings || showMesoModal || showRoiModal || showSessionArchive) ? 'auto' : 'none',
+              overflow: (showSettings || showMesoModal || showRoiModal || showSessionArchive) ? 'auto' : 'hidden',
             }}
           >
-            {!isSelecting && !showSettings && !showMesoModal && !showRoiModal && (
+            {!isSelecting && !showSettings && !showMesoModal && !showRoiModal && !showSessionArchive && (
               <>
                 {/* Section 1: 세션 시간 */}
                 <div 
@@ -871,10 +961,10 @@ function App() {
                     color: '#999',
                     textAlign: 'center'
                   }}>
-                    {targetDuration > 0 && trackingState === 'tracking' ? (
+                    {targetDuration > 0 && trackingState === 'tracking' && sessionStartTime ? (
                       (() => {
-                        const now = new Date();
-                        const targetTime = new Date(now.getTime() + (targetDuration * 60 - elapsedSeconds) * 1000);
+                        // Calculate target completion time based on session start time
+                        const targetTime = new Date(sessionStartTime + targetDuration * 60 * 1000);
                         const hours = Math.floor(targetDuration / 60);
                         const minutes = targetDuration % 60;
                         
@@ -894,7 +984,7 @@ function App() {
                         return `${timeLabel} 뒤: ${targetHours}:${targetMinutes}:${targetSeconds}`;
                       })()
                     ) : (
-                      '세션 시간'
+                      '전투 시간'
                     )}
                   </div>
                 </div>
@@ -926,33 +1016,86 @@ function App() {
                       <div style={{
                         fontSize: '16px',
                         fontWeight: '700',
-                        color: '#d32f2f'
+                        color: '#d32f2f',
+                        minWidth: '80px'
                       }}>
                         {levelUpETA}
                       </div>
                     </div>
                     <div>
-                      <div style={{
-                        fontSize: '14px',
-                        fontWeight: 600,
-                        color: '#666'
+                      <div style={{ 
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px'
                       }}>
-                        획득 경험치
+                        <span style={{
+                          fontSize: '14px',
+                          fontWeight: 600,
+                          color: '#666'
+                        }}>
+                          획득 경험치
+                        </span>
+                        <button
+                          onClick={handleOpenSessionArchive}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          style={{
+                            width: '24px',
+                            height: '24px',
+                            background: 'rgba(255, 193, 7, 0.1)',
+                            border: '1px solid rgba(255, 193, 7, 0.3)',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            padding: 0,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '14px',
+                            transition: 'all 0.15s ease'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.transform = 'scale(1.2)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.transform = 'scale(1)';
+                          }}
+                          title="전투 기록 보관함"
+                        >
+                          🏆️
+                        </button>
                       </div>
                       <div style={{
                         fontSize: '16px',
                         fontWeight: '700',
-                        color: '#2196F3'
+                        color: '#2196F3',
+                        minWidth: '100px'
                       }}>
-                        {parallelOcrTracker.stats?.total_exp?.toLocaleString('ko-KR') || '0'}
+                        {formatKoreanNumber(parallelOcrTracker.stats?.total_exp || 0)}
                       </div>
                     </div>
                   </div>
                   <div style={{
                     fontSize: '11px',
                     color: '#666',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0',
+                    lineHeight: '1.2'
                   }}>
-                    현재: Lv.{parallelOcrTracker.stats?.level || '?'} ({parallelOcrTracker.stats?.percentage?.toFixed(2) || '0.00'}%) | 시간당: {formatCompact(parallelOcrTracker.stats?.exp_per_hour || 0)}
+                    <div>
+                      현재: Lv.{parallelOcrTracker.stats?.level || '?'} (
+                      {startPercentage !== null && parallelOcrTracker.stats?.percentage !== null ? (
+                        <>
+                          {startPercentage.toFixed(2)}% → {parallelOcrTracker.stats.percentage.toFixed(2)}%
+                        </>
+                      ) : (
+                        `${parallelOcrTracker.stats?.percentage?.toFixed(2) || '0.00'}%`
+                      )}
+                      {startPercentage !== null && parallelOcrTracker.stats?.percentage !== null && (
+                        <> | {(parallelOcrTracker.stats.percentage - startPercentage).toFixed(2)}%</>
+                      )}
+                      )
+                    </div>
+                    <div>평균: {formatKoreanNumber(Math.floor((parallelOcrTracker.stats?.exp_per_hour || 0) / 3600))} (1초당)</div>
                   </div>
                 </div>
 
@@ -993,12 +1136,17 @@ function App() {
                         padding: 0,
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: '14px'
+                        justifyContent: 'center'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = 'scale(1.2)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = 'scale(1)';
                       }}
                       title="메소 관리"
                     >
-                      💰
+                      <img src={mesoIcon} alt="Meso" style={{ width: '16px', height: '16px' }} />
                     </button>
                   </div>
                   <div style={{
@@ -1008,7 +1156,7 @@ function App() {
                   }}>
                     <img src={hpIcon} alt="HP" style={{ width: '18px', height: '18px' }} />
                     <div style={{
-                      fontSize: '13px',
+                      fontSize: '16px',
                       fontWeight: '700',
                       color: '#f44336'
                     }}>
@@ -1022,7 +1170,7 @@ function App() {
                   }}>
                     <img src={mpIcon} alt="MP" style={{ width: '18px', height: '18px' }} />
                     <div style={{
-                      fontSize: '13px',
+                      fontSize: '16px',
                       fontWeight: '700',
                       color: '#2196F3'
                     }}>
@@ -1413,7 +1561,7 @@ function App() {
                         e.currentTarget.style.boxShadow = '0 2px 6px rgba(0, 0, 0, 0.15)';
                       }}
                     >
-                      💰 계산
+                      계산
                     </button>
                   </div>
 
@@ -1538,6 +1686,82 @@ function App() {
                       💾 저장
                     </button>
                   </div>
+                </div>
+              </>
+            )}
+
+            {!isSelecting && showSessionArchive && (
+              <>
+                {/* Draggable Title Bar for Session Archive */}
+                <div
+                  onMouseDown={handleDragStart}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    height: '40px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'move',
+                    zIndex: 999,
+                    userSelect: 'none'
+                  }}
+                >
+                  <span style={{
+                    fontSize: '12px',
+                    fontWeight: '600',
+                    color: '#999'
+                  }}>
+                    전투 기록
+                  </span>
+                </div>
+
+                {/* Back Button */}
+                <button
+                  onClick={handleCloseSessionArchive}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  style={{
+                    position: 'absolute',
+                    top: '8px',
+                    left: '8px',
+                    padding: '6px 12px',
+                    fontSize: '13px',
+                    background: 'rgba(255, 255, 255, 0.95)',
+                    color: '#333',
+                    border: '1px solid rgba(0, 0, 0, 0.2)',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    fontWeight: '600',
+                    zIndex: 1000,
+                    boxShadow: '0 2px 6px rgba(0, 0, 0, 0.1)'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(240, 240, 240, 1)';
+                    e.currentTarget.style.transform = 'scale(1.05)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.95)';
+                    e.currentTarget.style.transform = 'scale(1)';
+                  }}
+                >
+                  ← 뒤로
+                </button>
+
+                {/* Session Archive Content with Top Padding */}
+                <div style={{ paddingTop: '40px', width: '100%', height: '100%', overflow: 'auto' }}>
+                  <SessionArchive 
+                    currentSession={parallelOcrTracker.stats ? {
+                      elapsed_seconds: elapsedSeconds,
+                      total_exp: parallelOcrTracker.stats.total_exp,
+                      level: parallelOcrTracker.stats.level || 0,
+                      exp_per_second: (parallelOcrTracker.stats.exp_per_hour || 0) / 3600,
+                      hp_potions_used: parallelOcrTracker.stats.hp_potions_used,
+                      mp_potions_used: parallelOcrTracker.stats.mp_potions_used,
+                    } : null}
+                  />
                 </div>
               </>
             )}

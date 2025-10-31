@@ -8,6 +8,7 @@ interface TrackingStore {
   pausedSeconds: number;
   sessionStartTime: number | null;
   lastPauseTime: number | null;
+  startPercentage: number | null;
 
   // Actions
   startTracking: () => void;
@@ -15,6 +16,7 @@ interface TrackingStore {
   resetTracking: () => void;
   incrementTimer: () => void;
   getActiveDuration: () => number;
+  setStartPercentage: (percentage: number) => void;
 }
 
 export const useTrackingStore = create<TrackingStore>((set, get) => ({
@@ -23,6 +25,7 @@ export const useTrackingStore = create<TrackingStore>((set, get) => ({
   pausedSeconds: 0,
   sessionStartTime: null,
   lastPauseTime: null,
+  startPercentage: null,
 
   startTracking: () =>
     set((state) => {
@@ -56,6 +59,7 @@ export const useTrackingStore = create<TrackingStore>((set, get) => ({
       pausedSeconds: 0,
       sessionStartTime: null,
       lastPauseTime: null,
+      startPercentage: null,
     }),
 
   incrementTimer: () =>
@@ -67,4 +71,7 @@ export const useTrackingStore = create<TrackingStore>((set, get) => ({
     const state = get();
     return state.elapsedSeconds - state.pausedSeconds;
   },
+
+  setStartPercentage: (percentage: number) =>
+    set({ startPercentage: percentage }),
 }));

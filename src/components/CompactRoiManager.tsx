@@ -7,6 +7,7 @@ import {
   maximizeWindowForROI,
   restoreWindow,
   initScreenCapture,
+  autoDetectRois,
   setAlwaysOnTop,
   type Roi,
 } from '../lib/tauri';
@@ -16,8 +17,8 @@ import './CompactRoiManager.css';
 
 // Import icons
 import lvIcon from '/icons/lv.png';
-import hpIcon from '/icons/hp.png';
 import expIcon from '/icons/exp.png';
+import hpIcon from '/icons/hp.png';
 import mpIcon from '/icons/mp.png';
 
 interface WindowState {
@@ -32,10 +33,9 @@ interface CompactRoiManagerProps {
 }
 
 const ROI_CONFIGS = [
-  { type: 'level' as RoiType, label: 'Level', icon: lvIcon, color: '#4CAF50' },
-  { type: 'hp' as RoiType, label: 'HP', icon: hpIcon, color: '#F44336' },
-  { type: 'exp' as RoiType, label: 'EXP', icon: expIcon, color: '#2196F3' },
-  { type: 'mp' as RoiType, label: 'MP', icon: mpIcon, color: '#9C27B0' },
+  { type: 'level' as RoiType, label: '레벨', icon: lvIcon, color: '#4CAF50', autoDetect: true },
+  { type: 'exp' as RoiType, label: '경험치', icon: expIcon, color: '#2196F3', autoDetect: false },
+  { type: 'inventory' as RoiType, label: '포션', icon: [hpIcon, mpIcon], color: '#FF5722', autoDetect: true },
   // { type: 'mapLocation' as RoiType, label: 'Map', icon: '🗺️', color: '#9C27B0' }, // Commented out temporarily
   // { type: 'meso' as RoiType, label: 'Meso', icon: '💰', color: '#FF9800' }, // Commented out temporarily
 ];
@@ -48,7 +48,7 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
   const [previewRoiType, setPreviewRoiType] = useState<RoiType | null>(null);
   const windowStateRef = useRef<WindowState | null>(null);
 
-  const { levelRoi, expRoi, hpRoi, mpRoi, setRoi, removeRoi, loadAllRois } = useRoiStore();
+  const { levelRoi, expRoi, inventoryRoi, setRoi, removeRoi, loadAllRois, getLevelBoxes } = useRoiStore();
 
   useEffect(() => {
     const init = async () => {
@@ -63,9 +63,9 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
     switch (type) {
       case 'level': return levelRoi;
       case 'exp': return expRoi;
-      case 'hp': return hpRoi;
-      case 'mp': return mpRoi;
+      case 'inventory': return inventoryRoi;
       // case 'mapLocation': return mapLocationRoi; // Commented out temporarily
+      default: return null;
     }
   };
 
@@ -135,11 +135,44 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
 
   const handleViewPreview = async (type: RoiType) => {
     try {
-      const imageData = await invoke<string>('get_roi_preview', { roiType: type });
-      setPreviewImage(imageData);
+      // Get the ROI configuration for this type
+      const roi = getRoi(type);
+
+      if (!roi) {
+        console.error('No ROI configured for type:', type);
+        return;
+      }
+
+      // For level ROI, use matched box coordinates if available (like inventory)
+      let captureRoi = roi;
+      if (type === 'level') {
+        const levelBoxes = getLevelBoxes();
+        if (levelBoxes && levelBoxes.length > 0) {
+          // Calculate bounding box from all matched digit boxes
+          const minX = Math.min(...levelBoxes.map(b => b.x));
+          const minY = Math.min(...levelBoxes.map(b => b.y));
+          const maxX = Math.max(...levelBoxes.map(b => b.x + b.width));
+          const maxY = Math.max(...levelBoxes.map(b => b.y + b.height));
+
+          // Add padding (10 pixels on each side)
+          const padding = 10;
+          captureRoi = {
+            x: Math.max(0, minX - padding),
+            y: Math.max(0, minY - padding),
+            width: maxX - minX + padding * 2,
+            height: maxY - minY + padding * 2,
+          };
+        }
+      }
+
+      // Capture the region in real-time
+      const bytes = await captureRegion(captureRoi);
+      const dataUrl = bytesToDataUrl(bytes);
+
+      setPreviewImage(dataUrl);
       setPreviewRoiType(type);
     } catch (err) {
-      console.error('Failed to load preview:', err);
+      console.error('Failed to capture preview:', err);
     }
   };
 
@@ -170,25 +203,36 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
           {/* Buttons Container */}
           <div className={`roi-buttons-container ${previewImage ? 'slide-out' : ''}`}>
             <div className="roi-buttons">
-              {ROI_CONFIGS.map(({ type, label, icon, color }) => {
+              {ROI_CONFIGS.map(({ type, label, icon, color, autoDetect }) => {
                 const roi = getRoi(type);
                 const isConfigured = roi !== null;
+                // For auto-detect buttons, disable if ROI is not configured or invalid
+                const isAutoDetectDisabled = autoDetect && (!isConfigured || !roi || roi.width <= 0 || roi.height <= 0);
 
                 return (
                   <div key={type} className="roi-button-group">
                     <button
-                      onClick={() => handleSelectClick(type)}
-                      disabled={!isInitialized}
+                      onClick={() => autoDetect ? handleViewPreview(type) : handleSelectClick(type)}
+                      disabled={!isInitialized || isAutoDetectDisabled}
                       className="roi-select-btn"
                       style={{ borderColor: color }}
-                      title={`${label} 영역 ${isConfigured ? '재' : ''}선택`}
+                      title={autoDetect ? (isAutoDetectDisabled ? `${label} ROI 영역 미감지` : `${label} 자동 탐지 결과 보기`) : `${label} 영역 ${isConfigured ? '재' : ''}선택`}
                     >
-                      <img src={icon} alt={label} className="roi-icon-img" />
+                      {Array.isArray(icon) ? (
+                        <div className="roi-icon-stack">
+                          <img src={icon[0]} alt="HP" className="roi-icon-img-stacked roi-icon-img-back" />
+                          <img src={icon[1]} alt="MP" className="roi-icon-img-stacked roi-icon-img-front" />
+                        </div>
+                      ) : typeof icon === 'string' && icon.length <= 2 ? (
+                        <span style={{ fontSize: '24px' }}>{icon}</span>
+                      ) : (
+                        <img src={icon as string} alt={label} className="roi-icon-img" />
+                      )}
                       <span className="roi-label">{label}</span>
-                      {isConfigured && <span className="roi-check">✓</span>}
+                      {autoDetect ? <span className="roi-auto-badge">자동</span> : isConfigured && <span className="roi-check">✓</span>}
                     </button>
 
-                    {isConfigured && (
+                    {isConfigured && !autoDetect && (
                       <div className="roi-actions-compact">
                         <button
                           onClick={() => handleViewPreview(type)}

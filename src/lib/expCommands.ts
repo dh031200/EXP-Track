@@ -110,6 +110,25 @@ export function formatNumber(num: number): string {
 }
 
 /**
+ * Format number in Korean units (만)
+ * e.g., 576558 -> "57만 6558", 8001234 -> "800만 1234"
+ */
+export function formatKoreanNumber(num: number): string {
+  if (num < 10000) {
+    return num.toLocaleString('ko-KR');
+  }
+  
+  const man = Math.floor(num / 10000);
+  const remainder = num % 10000;
+  
+  if (remainder === 0) {
+    return `${man.toLocaleString('ko-KR')}만`;
+  }
+  
+  return `${man.toLocaleString('ko-KR')}만 ${remainder.toLocaleString('ko-KR')}`;
+}
+
+/**
  * Format percentage with 2 decimal places, ensuring 2 digits before decimal
  * e.g., 5.5 -> "05.50%", 12.34 -> "12.34%", 100 -> "100.00%"
  */
