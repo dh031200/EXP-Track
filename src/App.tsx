@@ -61,10 +61,12 @@ function App() {
     elapsedSeconds,
     pausedSeconds,
     sessionStartTime,
+    startPercentage,
     startTracking,
     pauseTracking,
     resetTracking,
     incrementTimer,
+    setStartPercentage,
   } = useTrackingStore();
 
   const {
@@ -274,6 +276,13 @@ function App() {
       setExpDataPoints([]);
     }
   }, [trackingState]);
+
+  // Save starting percentage when tracking starts and first stats arrive
+  useEffect(() => {
+    if (trackingState === 'tracking' && startPercentage === null && parallelOcrTracker.stats?.percentage !== null && parallelOcrTracker.stats?.percentage !== undefined) {
+      setStartPercentage(parallelOcrTracker.stats.percentage);
+    }
+  }, [trackingState, startPercentage, parallelOcrTracker.stats?.percentage, setStartPercentage]);
 
   // Format elapsed seconds as HH:MM:SS
   const formatTime = (seconds: number): string => {
@@ -1072,7 +1081,20 @@ function App() {
                     gap: '0',
                     lineHeight: '1.2'
                   }}>
-                    <div>현재: Lv.{parallelOcrTracker.stats?.level || '?'} ({parallelOcrTracker.stats?.percentage?.toFixed(2) || '0.00'}%)</div>
+                    <div>
+                      현재: Lv.{parallelOcrTracker.stats?.level || '?'} (
+                      {startPercentage !== null && parallelOcrTracker.stats?.percentage !== null ? (
+                        <>
+                          {startPercentage.toFixed(2)}% → {parallelOcrTracker.stats.percentage.toFixed(2)}%
+                        </>
+                      ) : (
+                        `${parallelOcrTracker.stats?.percentage?.toFixed(2) || '0.00'}%`
+                      )}
+                      {startPercentage !== null && parallelOcrTracker.stats?.percentage !== null && (
+                        <> | {(parallelOcrTracker.stats.percentage - startPercentage).toFixed(2)}%</>
+                      )}
+                      )
+                    </div>
                     <div>평균: {formatKoreanNumber(Math.floor((parallelOcrTracker.stats?.exp_per_hour || 0) / 3600))} (1초당)</div>
                   </div>
                 </div>
