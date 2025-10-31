@@ -200,6 +200,34 @@ impl TemplateMatcher {
         (exact_match as f32 / total_pixels) * 100.0
     }
 
+    /// Get best matching digit without threshold check (for debugging)
+    /// Returns (digit, similarity)
+    pub fn get_best_match(&self, digit_image: &GrayImage) -> Result<(u8, f32), String> {
+        let mut max_similarity = 0.0;
+        let mut best_digit = 0;
+
+        let (target_width, target_height) = digit_image.dimensions();
+
+        for template in &self.templates {
+            // Resize template to match digit_image size using NEAREST interpolation
+            let resized_template = image::imageops::resize(
+                &template.image,
+                target_width,
+                target_height,
+                image::imageops::FilterType::Nearest,
+            );
+
+            let similarity = self.calculate_similarity(digit_image, &resized_template);
+
+            if similarity > max_similarity {
+                max_similarity = similarity;
+                best_digit = template.digit;
+            }
+        }
+
+        Ok((best_digit, max_similarity))
+    }
+
     /// Match digit with highest similarity template (must be >= 95%)
     /// Templates are resized to match digit_image dimensions
     pub fn match_digit(&self, digit_image: &GrayImage) -> Result<Option<DigitMatch>, String> {
@@ -324,12 +352,18 @@ impl TemplateMatcher {
             }
 
             // Match digit
-            if let Some(mut digit_match) = self.match_digit(&white_digit)? {
-                digit_match.position = (bbox.x, bbox.y);
-                println!("✅ Box {} matched: digit={}, similarity={:.2}%", idx, digit_match.digit, digit_match.similarity);
-                digits.push(digit_match.digit);
-            } else {
-                println!("❌ Box {} failed: no match with sufficient similarity", idx);
+            match self.match_digit(&white_digit)? {
+                Some(mut digit_match) => {
+                    digit_match.position = (bbox.x, bbox.y);
+                    println!("✅ Box {} matched: digit={}, similarity={:.2}%", idx, digit_match.digit, digit_match.similarity);
+                    digits.push(digit_match.digit);
+                }
+                None => {
+                    // Get best match even if below threshold
+                    let (best_digit, best_similarity) = self.get_best_match(&white_digit)?;
+                    println!("❌ Box {} failed: best match was digit={}, similarity={:.2}% (threshold: 95.0%)",
+                        idx, best_digit, best_similarity);
+                }
             }
         }
 
