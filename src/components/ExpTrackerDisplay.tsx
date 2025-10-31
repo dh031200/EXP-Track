@@ -1,5 +1,5 @@
 import React from 'react';
-import { formatNumber, formatPercentage, formatCompact, type ExpStats } from '../lib/expCommands';
+import { formatNumber, formatPercentage, formatCompact, formatKoreanNumber, type ExpStats } from '../lib/expCommands';
 import './ExpTrackerDisplay.css';
 
 export interface ExpTrackerDisplayProps {
@@ -36,7 +36,7 @@ export const ExpTrackerDisplay: React.FC<ExpTrackerDisplayProps> = ({
           <div className="stat-info">
             <div className="stat-label-compact">경험치</div>
             <div className="stat-value-compact">
-              {stats ? formatNumber(stats.total_exp) : '0'}
+              {stats ? formatKoreanNumber(stats.total_exp) : '0'}
             </div>
           </div>
         </div>

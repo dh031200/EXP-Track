@@ -14,7 +14,7 @@ import { useMesoStore } from "./stores/mesoStore";
 import { useParallelOcrTracker } from "./hooks/useParallelOcrTracker";
 import { initScreenCapture } from "./lib/tauri";
 import { checkOcrHealth } from "./lib/ocrCommands";
-import { formatCompact } from "./lib/expCommands";
+import { formatCompact, formatKoreanNumber } from "./lib/expCommands";
 import "./App.css";
 
 // Import icons
@@ -414,7 +414,7 @@ function App() {
     
     const window = getCurrentWindow();
     await window.setResizable(true);
-    await window.setSize(new LogicalSize(510, 140));
+    await window.setSize(new LogicalSize(540, 130));
   };
 
   const handleOpenMesoModal = async () => {
@@ -436,7 +436,7 @@ function App() {
     
     const window = getCurrentWindow();
     await window.setResizable(true);
-    await window.setSize(new LogicalSize(510, 140));
+    await window.setSize(new LogicalSize(540, 130));
   };
 
   const handleMesoCalculate = () => {
@@ -567,7 +567,7 @@ function App() {
     setShowSettings(false);
     
     const window = getCurrentWindow();
-    await window.setSize(new LogicalSize(510, 140));
+    await window.setSize(new LogicalSize(540, 130));
   };
 
   const handleOpenHistory = async () => {
@@ -895,7 +895,7 @@ function App() {
                         return `${timeLabel} 뒤: ${targetHours}:${targetMinutes}:${targetSeconds}`;
                       })()
                     ) : (
-                      '세션 시간'
+                      '전투 시간'
                     )}
                   </div>
                 </div>
@@ -927,7 +927,8 @@ function App() {
                       <div style={{
                         fontSize: '16px',
                         fontWeight: '700',
-                        color: '#d32f2f'
+                        color: '#d32f2f',
+                        minWidth: '80px'
                       }}>
                         {levelUpETA}
                       </div>
@@ -943,17 +944,23 @@ function App() {
                       <div style={{
                         fontSize: '16px',
                         fontWeight: '700',
-                        color: '#2196F3'
+                        color: '#2196F3',
+                        minWidth: '100px'
                       }}>
-                        {parallelOcrTracker.stats?.total_exp?.toLocaleString('ko-KR') || '0'}
+                        {formatKoreanNumber(parallelOcrTracker.stats?.total_exp || 0)}
                       </div>
                     </div>
                   </div>
                   <div style={{
                     fontSize: '11px',
                     color: '#666',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0',
+                    lineHeight: '1.2'
                   }}>
-                    현재: Lv.{parallelOcrTracker.stats?.level || '?'} ({parallelOcrTracker.stats?.percentage?.toFixed(2) || '0.00'}%) | 시간당: {formatCompact(parallelOcrTracker.stats?.exp_per_hour || 0)}
+                    <div>현재: Lv.{parallelOcrTracker.stats?.level || '?'} ({parallelOcrTracker.stats?.percentage?.toFixed(2) || '0.00'}%)</div>
+                    <div>평균: {formatKoreanNumber(Math.floor((parallelOcrTracker.stats?.exp_per_hour || 0) / 3600))}(1초당)</div>
                   </div>
                 </div>
 
@@ -1008,7 +1015,7 @@ function App() {
                   }}>
                     <img src={hpIcon} alt="HP" style={{ width: '18px', height: '18px' }} />
                     <div style={{
-                      fontSize: '13px',
+                      fontSize: '16px',
                       fontWeight: '700',
                       color: '#f44336'
                     }}>
@@ -1022,7 +1029,7 @@ function App() {
                   }}>
                     <img src={mpIcon} alt="MP" style={{ width: '18px', height: '18px' }} />
                     <div style={{
-                      fontSize: '13px',
+                      fontSize: '16px',
                       fontWeight: '700',
                       color: '#2196F3'
                     }}>
