@@ -189,12 +189,12 @@ impl InventoryTemplateMatcher {
             image::imageops::FilterType::Nearest,
         );
 
-        // Step 7: Final threshold for OCR (threshold 1)
-        // Dark pixels (< 1) become white (255) - digits
-        // Bright pixels (≥ 1) become black (0) - background
+        // Step 7: Final threshold for OCR (threshold 20)
+        // Dark pixels (< 20) become white (255) - digits
+        // Bright pixels (≥ 20) become black (0) - background
         let final_binary = ImageBuffer::from_fn(522, 255, |x, y| {
             let pixel = resized_gray.get_pixel(x, y);
-            if pixel[0] < 1 {
+            if pixel[0] < 20 {
                 Luma([255u8])  // Dark pixels → white
             } else {
                 Luma([0u8])    // Bright pixels → black
