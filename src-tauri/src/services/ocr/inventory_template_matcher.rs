@@ -444,7 +444,7 @@ impl InventoryTemplateMatcher {
                     &template.image,
                     scaled_width,
                     scaled_height,
-                    image::imageops::FilterType::Nearest,
+                    image::imageops::FilterType::Lanczos3,
                 );
 
                 // Template matching at current scale
