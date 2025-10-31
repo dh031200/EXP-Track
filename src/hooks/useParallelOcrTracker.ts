@@ -151,6 +151,19 @@ export function useParallelOcrTracker() {
         expRoi,
       });
       console.log('✅ Rust OCR tracker started with event-driven updates');
+
+      // Poll stats periodically to update time-based calculations (exp_per_hour, etc.)
+      if (statsIntervalRef.current !== null) {
+        clearInterval(statsIntervalRef.current);
+      }
+      statsIntervalRef.current = window.setInterval(async () => {
+        try {
+          const stats = await invoke<ExpStats>('get_tracking_stats');
+          setCurrentStats(stats);
+        } catch (err) {
+          console.error('Failed to poll tracking stats:', err);
+        }
+      }, 1000);
     } catch (error) {
       console.error('❌ Failed to start Rust OCR tracker:', error);
       isTrackingRef.current = false;
