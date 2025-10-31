@@ -58,6 +58,7 @@ legacy/
 scripts/
 extract_level_final_e2e.py
 docs/
+coordinate_data/
 
 # Python
 __pycache__/

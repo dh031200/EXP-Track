@@ -409,9 +409,14 @@ impl InventoryTemplateMatcher {
         Ok(results)
     }
 
-    /// Detect all digits in ROI using height-based template matching
-    /// Templates are resized to match ROI height, then slide horizontally only
-    fn detect_digits_in_roi(&self, gray: &GrayImage, roi: &SlotRoi, slot_name: &str) -> Result<Vec<DigitDetection>, String> {
+    /// Detect all digits in ROI using coordinate-based direct extraction
+    /// Uses known digit positions based on center-alignment formula
+    fn detect_digits_in_roi(&self, gray: &GrayImage, roi: &SlotRoi, _slot_name: &str) -> Result<Vec<DigitDetection>, String> {
+        // Constants from coordinate analysis
+        const WIDTH_1: f32 = 18.68;
+        const WIDTH_OTHER: f32 = 30.0;
+        const HEIGHT: u32 = 42;
+
         // Extract ROI
         let roi_image = image::imageops::crop_imm(
             gray,
@@ -421,338 +426,182 @@ impl InventoryTemplateMatcher {
             roi.height,
         ).to_image();
 
-        let roi_height = roi.height;
-        let threshold = 0.7;
+        // Step 1: Find number region (white pixels bounding box)
+        let number_bbox = match self.find_number_region(&roi_image) {
+            Some(bbox) => bbox,
+            None => return Ok(Vec::new()), // No digits found
+        };
 
-        use rayon::prelude::*;
-
-        // Parallel matching: each template resized to ROI height
-        let all_detections: Vec<DigitDetection> = self.templates.par_iter()
-            .flat_map(|template| {
-                let (tmpl_width, tmpl_height) = template.image.dimensions();
-
-                // Resize template to match ROI height (maintain aspect ratio)
-                let scale_factor = roi_height as f32 / tmpl_height as f32;
-                let scaled_width = (tmpl_width as f32 * scale_factor) as u32;
-
-                if scaled_width > roi.width {
-                    return Vec::new(); // Template too wide after height adjustment
-                }
-
-                let height_matched_template = image::imageops::resize(
-                    &template.image,
-                    scaled_width,
-                    roi_height,
-                    image::imageops::FilterType::Lanczos3,
-                );
-
-                // Horizontal-only sliding window (y=0 fixed)
-                let matches = self.match_template_horizontal(&roi_image, &height_matched_template, threshold);
-
-                // Debug: Print all attempts (matches and non-matches)
-                #[cfg(debug_assertions)]
-                {
-                    if !matches.is_empty() {
-                        let max_score = matches.iter().map(|(_, _, s)| s).fold(0.0f32, |a, &b| a.max(b));
-                        println!("      ✅ digit={}, template={}: {} matches (max_score={:.3})",
-                            template.digit,
-                            template.name,
-                            matches.len(),
-                            max_score
-                        );
-
-                        // Save debug image for this template
-                        self.save_debug_image(&roi_image, &template.name, &height_matched_template, &matches, slot_name);
-                    } else {
-                        println!("      ❌ digit={}, template={}: no matches (threshold={})",
-                            template.digit,
-                            template.name,
-                            threshold
-                        );
-                    }
-                }
-
-                // Convert to DigitDetection
-                matches.into_iter().map(|(x, y, score)| {
-                    DigitDetection {
-                        digit: template.digit,
-                        x: x + roi.x,
-                        y: y + roi.y,
-                        width: scaled_width,
-                        height: roi_height,
-                        score,
-                        scale: scale_factor,
-                    }
-                }).collect()
-            })
-            .collect();
-
-        // Apply NMS to remove overlapping detections
-        let filtered = self.non_maximum_suppression(all_detections, 0.05)?;
-
-        // Filter by height consistency
-        let height_filtered = self.filter_by_height(filtered, 0.2)?;
-
-        // Remove duplicates
-        let final_detections = self.remove_duplicates(height_filtered, 5)?;
-
-        Ok(final_detections)
-    }
-
-    /// Horizontal-only template matching (y=0 fixed, x slides)
-    /// Template height must match image height
-    fn match_template_horizontal(&self, image: &GrayImage, template: &GrayImage, threshold: f32) -> Vec<(u32, u32, f32)> {
-        let (img_width, img_height) = image.dimensions();
-        let (tmpl_width, tmpl_height) = template.dimensions();
-
-        if tmpl_width > img_width || tmpl_height != img_height {
-            return Vec::new();
-        }
-
-        let mut matches = Vec::new();
-
-        // Slide horizontally only (y=0)
-        for x in 0..=(img_width - tmpl_width) {
-            let score = self.calculate_ncc(image, template, x, 0);
-            if score >= threshold {
-                matches.push((x, 0, score));
-            }
-        }
-
-        matches
-    }
-
-    /// Template matching using exact pixel matching for binary images
-    fn match_template(&self, image: &GrayImage, template: &GrayImage, threshold: f32) -> Vec<(u32, u32, f32)> {
-        let (img_width, img_height) = image.dimensions();
-        let (tmpl_width, tmpl_height) = template.dimensions();
-
-        if tmpl_width > img_width || tmpl_height > img_height {
-            return Vec::new();
-        }
-
-        let mut matches = Vec::new();
-
-        for y in 0..=(img_height - tmpl_height) {
-            for x in 0..=(img_width - tmpl_width) {
-                let score = self.calculate_ncc(image, template, x, y);
-                if score >= threshold {
-                    matches.push((x, y, score));
-                }
-            }
-        }
-
-        matches
-    }
-
-    /// Calculate binary image similarity using exact pixel matching
-    /// Optimized for binary images (0 or 255) - counts exact matches
-    fn calculate_ncc(&self, image: &GrayImage, template: &GrayImage, x: u32, y: u32) -> f32 {
-        let (tmpl_width, tmpl_height) = template.dimensions();
-
-        let mut matched_pixels = 0;
-        let total_pixels = tmpl_width * tmpl_height;
-
-        for ty in 0..tmpl_height {
-            for tx in 0..tmpl_width {
-                let img_pixel = image.get_pixel(x + tx, y + ty)[0];
-                let tmpl_pixel = template.get_pixel(tx, ty)[0];
-
-                // Exact match for binary images
-                if img_pixel == tmpl_pixel {
-                    matched_pixels += 1;
-                }
-            }
-        }
-
-        // Return match ratio (0.0 ~ 1.0)
-        matched_pixels as f32 / total_pixels as f32
-    }
-
-    /// Draw rectangle on RGB image
-    fn draw_rect(image: &mut RgbImage, x: u32, y: u32, width: u32, height: u32, color: Rgb<u8>, thickness: u32) {
-        let (img_width, img_height) = image.dimensions();
-
-        // Draw top and bottom edges
-        for i in 0..thickness {
-            for dx in 0..width {
-                let px = x + dx;
-                if y + i < img_height && px < img_width {
-                    image.put_pixel(px, y + i, color);
-                }
-                if y + height > i && y + height - 1 - i < img_height && px < img_width {
-                    image.put_pixel(px, y + height - 1 - i, color);
-                }
-            }
-        }
-
-        // Draw left and right edges
-        for i in 0..thickness {
-            for dy in 0..height {
-                let py = y + dy;
-                if x + i < img_width && py < img_height {
-                    image.put_pixel(x + i, py, color);
-                }
-                if x + width > i && x + width - 1 - i < img_width && py < img_height {
-                    image.put_pixel(x + width - 1 - i, py, color);
-                }
-            }
-        }
-    }
-
-    /// Save debug image with sliding window visualization
-    fn save_debug_image(
-        &self,
-        roi_image: &GrayImage,
-        template_name: &str,
-        template: &GrayImage,
-        matches: &[(u32, u32, f32)],
-        slot_name: &str,
-    ) {
-        let (width, height) = roi_image.dimensions();
-        let (tmpl_width, tmpl_height) = template.dimensions();
-
-        // Convert grayscale to RGB
-        let mut rgb_image = RgbImage::from_fn(width, height, |x, y| {
-            let gray_val = roi_image.get_pixel(x, y)[0];
-            Rgb([gray_val, gray_val, gray_val])
-        });
-
-        // Draw sliding window area (blue)
-        let blue = Rgb([0u8, 0u8, 255u8]);
-        Self::draw_rect(&mut rgb_image, 0, 0, width, height, blue, 2);
-
-        // Draw all matches (green) with similarity
-        let green = Rgb([0u8, 255u8, 0u8]);
-        for (x, y, _score) in matches {
-            Self::draw_rect(&mut rgb_image, *x, *y, tmpl_width, tmpl_height, green, 1);
-        }
-
-        // Save to debug directory (cross-platform)
-        let temp_dir = std::env::temp_dir();
-        let debug_dir = temp_dir.join("inventory_debug");
-        std::fs::create_dir_all(&debug_dir).ok();
-
-        let filename = debug_dir.join(format!("{}_{}_matches_{}.png",
-            slot_name,
-            template_name,
-            matches.len()
-        ));
-
-        rgb_image.save(&filename).ok();
+        let (bbox_x, bbox_y, bbox_width, bbox_height) = number_bbox;
 
         #[cfg(debug_assertions)]
-        println!("      💾 Debug image saved: {}", filename.display());
-    }
+        println!("      📏 Number region: x={}, y={}, w={}, h={}", bbox_x, bbox_y, bbox_width, bbox_height);
 
-    /// Non-maximum suppression to remove overlapping detections
-    fn non_maximum_suppression(&self, mut detections: Vec<DigitDetection>, overlap_threshold: f32) -> Result<Vec<DigitDetection>, String> {
-        if detections.is_empty() {
+        // Step 2: Estimate digit count from width
+        let digit_count = self.estimate_digit_count(bbox_width);
+
+        #[cfg(debug_assertions)]
+        println!("      🔢 Estimated digit count: {}", digit_count);
+
+        if digit_count == 0 {
             return Ok(Vec::new());
         }
 
-        // Sort by score (descending)
-        detections.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
+        // Step 3: Calculate start position (center alignment)
+        let start_x = bbox_x;
+        let start_y = bbox_y;
 
-        let mut kept = Vec::new();
+        // Step 4: Extract and match each digit position
+        let mut detections = Vec::new();
+        let mut current_x = start_x;
 
-        for detection in detections {
-            let mut overlaps = false;
+        for digit_idx in 0..digit_count {
+            // Try both widths: 18.68 (digit 1) and 30.0 (others)
+            let candidates = vec![
+                (WIDTH_1, "narrow"),
+                (WIDTH_OTHER, "wide"),
+            ];
 
-            for kept_det in &kept {
-                let overlap_area = self.calculate_overlap(&detection, kept_det);
-                let min_area = (detection.width * detection.height).min(kept_det.width * kept_det.height) as f32;
+            let mut best_match: Option<(u8, f32, f32)> = None; // (digit, score, width)
 
-                if overlap_area > overlap_threshold * min_area {
-                    overlaps = true;
-                    break;
+            for (width, _width_type) in &candidates {
+                let digit_width = *width as u32;
+
+                // Check bounds
+                if current_x + digit_width > roi_image.width() {
+                    continue;
+                }
+
+                // Extract digit region
+                let digit_region = imageops::crop_imm(
+                    &roi_image,
+                    current_x,
+                    start_y,
+                    digit_width,
+                    HEIGHT.min(roi_image.height() - start_y),
+                ).to_image();
+
+                // Match against all templates
+                for template in &self.templates {
+                    // Resize template to match digit region size
+                    let resized_template = imageops::resize(
+                        &template.image,
+                        digit_region.width(),
+                        digit_region.height(),
+                        imageops::FilterType::Lanczos3,
+                    );
+
+                    let score = self.calculate_similarity(&digit_region, &resized_template);
+
+                    if score > best_match.as_ref().map(|(_, s, _)| *s).unwrap_or(0.0) {
+                        best_match = Some((template.digit, score, *width));
+                    }
                 }
             }
 
-            if !overlaps {
-                kept.push(detection);
+            // Accept if score >= 0.70
+            if let Some((digit, score, width)) = best_match {
+                if score >= 0.70 {
+                    #[cfg(debug_assertions)]
+                    println!("      ✅ Position {}: digit={}, score={:.3}, width={:.2}",
+                        digit_idx, digit, score, width);
+
+                    detections.push(DigitDetection {
+                        digit,
+                        x: current_x + roi.x,
+                        y: start_y + roi.y,
+                        width: width as u32,
+                        height: HEIGHT,
+                        score,
+                        scale: 1.0,
+                    });
+
+                    current_x += width as u32;
+                } else {
+                    #[cfg(debug_assertions)]
+                    println!("      ❌ Position {}: score too low ({:.3})", digit_idx, score);
+                    break;
+                }
+            } else {
+                #[cfg(debug_assertions)]
+                println!("      ❌ Position {}: no match found", digit_idx);
+                break;
             }
         }
 
-        Ok(kept)
+        Ok(detections)
     }
 
-    /// Calculate overlap area between two detections
-    fn calculate_overlap(&self, d1: &DigitDetection, d2: &DigitDetection) -> f32 {
-        let x_overlap = (d1.x + d1.width).min(d2.x + d2.width) as i32 - d1.x.max(d2.x) as i32;
-        let y_overlap = (d1.y + d1.height).min(d2.y + d2.height) as i32 - d1.y.max(d2.y) as i32;
+    /// Find number region in ROI (white pixels bounding box)
+    fn find_number_region(&self, image: &GrayImage) -> Option<(u32, u32, u32, u32)> {
+        let (width, height) = image.dimensions();
 
-        if x_overlap > 0 && y_overlap > 0 {
-            (x_overlap * y_overlap) as f32
+        let mut min_x = width;
+        let mut max_x = 0;
+        let mut min_y = height;
+        let mut max_y = 0;
+        let mut found = false;
+
+        for y in 0..height {
+            for x in 0..width {
+                if image.get_pixel(x, y)[0] == 255 { // White pixel
+                    min_x = min_x.min(x);
+                    max_x = max_x.max(x);
+                    min_y = min_y.min(y);
+                    max_y = max_y.max(y);
+                    found = true;
+                }
+            }
+        }
+
+        if found {
+            let bbox_width = max_x - min_x + 1;
+            let bbox_height = max_y - min_y + 1;
+            Some((min_x, min_y, bbox_width, bbox_height))
         } else {
-            0.0
+            None
         }
     }
 
-    /// Filter detections by height consistency
-    fn filter_by_height(&self, detections: Vec<DigitDetection>, tolerance: f32) -> Result<Vec<DigitDetection>, String> {
-        if detections.is_empty() {
-            return Ok(Vec::new());
+    /// Estimate digit count from number region width
+    fn estimate_digit_count(&self, width: u32) -> usize {
+        // Based on coordinate analysis:
+        // 1 digit: 18-30px
+        // 2 digits: 37-60px
+        // 3 digits: 56-90px
+        // 4 digits: 74-120px
+
+        if width >= 18 && width <= 30 {
+            1
+        } else if width >= 37 && width <= 60 {
+            2
+        } else if width >= 56 && width <= 90 {
+            3
+        } else if width >= 74 && width <= 120 {
+            4
+        } else {
+            0 // Invalid width
         }
-
-        // Calculate median height
-        let mut heights: Vec<u32> = detections.iter().map(|d| d.height).collect();
-        heights.sort();
-        let median_height = heights[heights.len() / 2];
-
-        // Filter detections within tolerance
-        let filtered: Vec<DigitDetection> = detections.into_iter()
-            .filter(|d| {
-                let diff = (d.height as i32 - median_height as i32).abs() as f32;
-                diff <= median_height as f32 * tolerance
-            })
-            .collect();
-
-        Ok(filtered)
     }
 
-    /// Remove duplicate detections at same position
-    fn remove_duplicates(&self, mut detections: Vec<DigitDetection>, position_tolerance: u32) -> Result<Vec<DigitDetection>, String> {
-        if detections.is_empty() {
-            return Ok(Vec::new());
+    /// Calculate similarity between two images (exact pixel matching)
+    fn calculate_similarity(&self, img1: &GrayImage, img2: &GrayImage) -> f32 {
+        if img1.dimensions() != img2.dimensions() {
+            return 0.0;
         }
 
-        // Sort by score (descending)
-        detections.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
+        let total_pixels = (img1.width() * img1.height()) as f32;
+        let mut matched_pixels = 0;
 
-        let mut kept: Vec<DigitDetection> = Vec::new();
-
-        for detection in detections {
-            let mut is_duplicate = false;
-
-            for kept_det in &kept {
-                // Check position proximity
-                let x_diff = (detection.x as i32 - kept_det.x as i32).abs() as u32;
-                let y_diff = (detection.y as i32 - kept_det.y as i32).abs() as u32;
-
-                if x_diff <= position_tolerance && y_diff <= position_tolerance {
-                    is_duplicate = true;
-                    break;
-                }
-
-                // Check overlap
-                let overlap = self.calculate_overlap(&detection, kept_det);
-                let current_area = (detection.width * detection.height) as f32;
-                let kept_area = (kept_det.width * kept_det.height) as f32;
-
-                if overlap > 0.3 * current_area.min(kept_area) {
-                    is_duplicate = true;
-                    break;
-                }
-            }
-
-            if !is_duplicate {
-                kept.push(detection);
+        for (p1, p2) in img1.pixels().zip(img2.pixels()) {
+            if p1[0] == p2[0] {
+                matched_pixels += 1;
             }
         }
 
-        Ok(kept)
+        (matched_pixels as f32 / total_pixels) * 100.0
     }
+
 
     /// Get available slot names
     pub fn get_available_slots(&self) -> Vec<String> {
