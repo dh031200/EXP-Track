@@ -107,7 +107,7 @@ impl TemplateMatcher {
                     let pixel = rgb_image.get_pixel(x, y);
                     let (h, s, v) = rgb_to_hsv(pixel[0], pixel[1], pixel[2]);
 
-                    // Check if pixel is in wider orange range
+                    // Orange color range (wider range for better detection)
                     // H[0-40]: broader orange/red spectrum
                     // S[100-255]: include lighter/desaturated oranges
                     // V[120-255]: include darker oranges
@@ -163,21 +163,14 @@ impl TemplateMatcher {
         Ok((boxes, String::new()))
     }
 
-    /// Extract white digit from box image (resize + binarize)
+    /// Extract white digit from box image (binarize only, no resize)
     pub fn extract_white_digit(&self, box_image: &DynamicImage) -> Result<GrayImage, String> {
-        // Step 1: Resize to 35x41 (NEAREST for sharp edges)
-        let resized = image::imageops::resize(
-            &box_image.to_rgb8(),
-            35,
-            41,
-            image::imageops::FilterType::Nearest,
-        );
-        
-        // Step 2: Convert to grayscale
-        let gray = DynamicImage::ImageRgb8(resized).to_luma8();
-        
-        // Step 3: Binarize with threshold 200
-        let binary = ImageBuffer::from_fn(35, 41, |x, y| {
+        // Step 1: Convert to grayscale
+        let gray = box_image.to_luma8();
+
+        // Step 2: Binarize with threshold 200
+        let (width, height) = gray.dimensions();
+        let binary = ImageBuffer::from_fn(width, height, |x, y| {
             let pixel = gray.get_pixel(x, y);
             if pixel[0] > 200 {
                 Luma([255u8])
@@ -185,7 +178,7 @@ impl TemplateMatcher {
                 Luma([0u8])
             }
         });
-        
+
         Ok(binary)
     }
 
@@ -207,27 +200,38 @@ impl TemplateMatcher {
         (exact_match as f32 / total_pixels) * 100.0
     }
 
-    /// Match digit with highest similarity template (must be >= 95%)
+    /// Match digit with highest similarity template (must be >= 92.5%)
+    /// Templates are resized to match digit_image dimensions
     pub fn match_digit(&self, digit_image: &GrayImage) -> Result<Option<DigitMatch>, String> {
         let mut max_similarity = 0.0;
         let mut best_digit = None;
         let mut best_template_name = None;
-        
+
+        let (target_width, target_height) = digit_image.dimensions();
+
         for template in &self.templates {
-            let similarity = self.calculate_similarity(digit_image, &template.image);
-            
+            // Resize template to match digit_image size using NEAREST interpolation
+            let resized_template = image::imageops::resize(
+                &template.image,
+                target_width,
+                target_height,
+                image::imageops::FilterType::Nearest,
+            );
+
+            let similarity = self.calculate_similarity(digit_image, &resized_template);
+
             if similarity > max_similarity {
                 max_similarity = similarity;
                 best_digit = Some(template.digit);
                 best_template_name = Some(template.name.clone());
             }
         }
-        
-        // Reject if similarity is below 95%
-        if max_similarity < 95.0 {
+
+        // Reject if similarity is below 92.5%
+        if max_similarity < 92.5 {
             return Ok(None);
         }
-        
+
         Ok(Some(DigitMatch {
             digit: best_digit.unwrap(),
             similarity: max_similarity,
@@ -236,8 +240,9 @@ impl TemplateMatcher {
         }))
     }
 
-    /// Recognize level number from image
-    pub fn recognize_level(&self, image: &DynamicImage) -> Result<u32, String> {
+    /// Recognize level number from image and return matched box coordinates
+    /// Returns (level, matched_boxes) where matched_boxes are the successfully recognized digit boxes
+    pub fn recognize_level_with_boxes(&self, image: &DynamicImage) -> Result<(u32, Vec<BoundingBox>), String> {
         // Find orange boxes
         let mask = self.extract_orange_boxes(image)?;
 
@@ -253,8 +258,9 @@ impl TemplateMatcher {
 
         // Match each digit
         let mut digits = Vec::new();
+        let mut matched_boxes = Vec::new(); // Track successfully matched boxes
 
-        for bbox in boxes.iter() {
+        for (_idx, bbox) in boxes.iter().enumerate() {
             // Extract box without padding
             let box_img = image.crop_imm(
                 bbox.x,
@@ -263,14 +269,23 @@ impl TemplateMatcher {
                 bbox.height,
             );
 
+            // Check width/height ratio after crop (0.79 ~ 0.91)
+            let w_h_ratio = bbox.width as f32 / bbox.height as f32;
+            const MIN_WH_RATIO: f32 = 0.79;
+            const MAX_WH_RATIO: f32 = 0.91;
+
+            if w_h_ratio < MIN_WH_RATIO || w_h_ratio > MAX_WH_RATIO {
+                continue;
+            }
+
             // Extract white digit
             let white_digit = self.extract_white_digit(&box_img)?;
 
-            // Check white pixel ratio (9% ~ 21.5%)
-            const MIN_WHITE_RATIO: f32 = 9.0;
+            // Check white pixel ratio (7.5% ~ 21.5%)
+            const MIN_WHITE_RATIO: f32 = 7.5;
             const MAX_WHITE_RATIO: f32 = 21.5;
 
-            let total_pixels = (35 * 41) as f32;
+            let total_pixels = (bbox.width * bbox.height) as f32;
             let white_pixels = white_digit.pixels().filter(|p| p[0] == 255).count() as f32;
             let white_ratio = (white_pixels / total_pixels) * 100.0;
 
@@ -279,16 +294,22 @@ impl TemplateMatcher {
             }
 
             // Match digit
-            if let Some(mut digit_match) = self.match_digit(&white_digit)? {
-                digit_match.position = (bbox.x, bbox.y);
-                digits.push(digit_match.digit);
+            match self.match_digit(&white_digit)? {
+                Some(mut digit_match) => {
+                    digit_match.position = (bbox.x, bbox.y);
+                    digits.push(digit_match.digit);
+                    matched_boxes.push(bbox.clone()); // Save successfully matched box
+                }
+                None => {
+                    // Skip box if no match
+                }
             }
         }
 
         if digits.is_empty() {
             return Err("No digits matched with sufficient similarity".to_string());
         }
-        
+
         // Combine digits to form level number
         let level_str: String = digits.iter().map(|d| d.to_string()).collect();
         let level = level_str.parse::<u32>()
@@ -299,6 +320,12 @@ impl TemplateMatcher {
             return Err(format!("Invalid level range: {} (expected 1-300)", level));
         }
 
+        Ok((level, matched_boxes))
+    }
+
+    /// Recognize level number from image (backward compatibility)
+    pub fn recognize_level(&self, image: &DynamicImage) -> Result<u32, String> {
+        let (level, _boxes) = self.recognize_level_with_boxes(image)?;
         Ok(level)
     }
 }
@@ -430,16 +457,16 @@ mod tests {
     #[test]
     fn test_similarity_calculation() {
         let matcher = TemplateMatcher::new();
-        
-        // Create two identical 10x10 images
-        let img1 = GrayImage::from_pixel(10, 10, Luma([255u8]));
-        let img2 = GrayImage::from_pixel(10, 10, Luma([255u8]));
-        
+
+        // Create two identical 30x35 images (typical digit box size)
+        let img1 = GrayImage::from_pixel(30, 35, Luma([255u8]));
+        let img2 = GrayImage::from_pixel(30, 35, Luma([255u8]));
+
         let similarity = matcher.calculate_similarity(&img1, &img2);
         assert_eq!(similarity, 100.0);
-        
+
         // Create different images
-        let img3 = GrayImage::from_pixel(10, 10, Luma([0u8]));
+        let img3 = GrayImage::from_pixel(30, 35, Luma([0u8]));
         let similarity = matcher.calculate_similarity(&img1, &img3);
         assert_eq!(similarity, 0.0);
     }

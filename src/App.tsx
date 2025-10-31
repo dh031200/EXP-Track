@@ -12,7 +12,7 @@ import { useSessionStore } from "./stores/sessionStore";
 import { useTimerSettingsStore } from "./stores/timerSettingsStore";
 import { useMesoStore } from "./stores/mesoStore";
 import { useParallelOcrTracker } from "./hooks/useParallelOcrTracker";
-import { initScreenCapture } from "./lib/tauri";
+import { initScreenCapture, autoDetectRois } from "./lib/tauri";
 import { checkOcrHealth } from "./lib/ocrCommands";
 import { formatCompact, formatKoreanNumber } from "./lib/expCommands";
 import "./App.css";
@@ -51,6 +51,7 @@ function App() {
     mpPotions: number;
   }>>([]);
   const [ocrHealthy, setOcrHealthy] = useState(false);
+  const [autoDetectCompleted, setAutoDetectCompleted] = useState(false);
 
   const backgroundOpacity = useSettingsStore((state) => state.backgroundOpacity);
   const targetDuration = useSettingsStore((state) => state.targetDuration);
@@ -59,10 +60,13 @@ function App() {
     state: trackingState,
     elapsedSeconds,
     pausedSeconds,
+    sessionStartTime,
+    startPercentage,
     startTracking,
     pauseTracking,
     resetTracking,
     incrementTimer,
+    setStartPercentage,
   } = useTrackingStore();
 
   const {
@@ -95,14 +99,18 @@ function App() {
   // Check if any ROI is configured
   const hasAnyRoi = levelRoi !== null || expRoi !== null;
 
+  // Screen capture initialization state
+  const [screenCaptureReady, setScreenCaptureReady] = useState(false);
+
   // Initialize screen capture on app start
   useEffect(() => {
     const initCapture = async () => {
       try {
         await initScreenCapture();
-        console.log('Screen capture initialized successfully');
+        console.log('✅ Screen capture initialized successfully');
+        setScreenCaptureReady(true);
       } catch (error) {
-        console.error('Failed to initialize screen capture:', error);
+        console.error('❌ Failed to initialize screen capture:', error);
       }
     };
 
@@ -148,6 +156,62 @@ function App() {
 
     return () => clearInterval(interval);
   }, [ocrHealthy]);
+
+  // Auto-detect ROIs once everything is ready (one-time on app start)
+  useEffect(() => {
+    // Wait for both screen capture and OCR to be ready
+    if (!screenCaptureReady || !ocrHealthy || autoDetectCompleted) return;
+
+    console.log('🚀 All systems ready, starting auto-detect...');
+
+    const performAutoDetect = async () => {
+      let attempts = 0;
+      let detected = false;
+
+      while (attempts < 3 && !detected) {
+        attempts++;
+        try {
+          console.log(`Auto-detecting ROIs (attempt ${attempts}/3)...`);
+          const result = await autoDetectRois();
+
+          // Save detected ROIs
+          const { setRoi, setLevelWithBoxes } = useRoiStore.getState();
+
+          if (result.level) {
+            // If level boxes are available, use setLevelWithBoxes to store both ROI and boxes
+            if (result.level_boxes && result.level_boxes.length > 0) {
+              await setLevelWithBoxes(result.level, result.level_boxes);
+              console.log(`✅ Level ROI auto-detected with ${result.level_boxes.length} digit boxes`);
+            } else {
+              await setRoi('level', result.level);
+              console.log('✅ Level ROI auto-detected and saved');
+            }
+          }
+
+          if (result.inventory) {
+            await setRoi('inventory', result.inventory);
+            console.log('✅ Inventory ROI auto-detected and saved');
+          }
+
+          // Consider successful if at least one ROI was detected
+          if (result.level || result.inventory) {
+            detected = true;
+            console.log('✅ Auto-detect completed successfully');
+          }
+        } catch (err) {
+          console.error(`Auto-detect attempt ${attempts} failed:`, err);
+        }
+      }
+
+      if (!detected) {
+        console.warn('⚠️ Failed to auto-detect ROIs after 3 attempts');
+      }
+
+      setAutoDetectCompleted(true);
+    };
+
+    performAutoDetect();
+  }, [screenCaptureReady, ocrHealthy, autoDetectCompleted]);
 
   // Timer effect - increment every second when tracking
   useEffect(() => {
@@ -212,6 +276,13 @@ function App() {
       setExpDataPoints([]);
     }
   }, [trackingState]);
+
+  // Save starting percentage when tracking starts and first stats arrive
+  useEffect(() => {
+    if (trackingState === 'tracking' && startPercentage === null && parallelOcrTracker.stats?.percentage !== null && parallelOcrTracker.stats?.percentage !== undefined) {
+      setStartPercentage(parallelOcrTracker.stats.percentage);
+    }
+  }, [trackingState, startPercentage, parallelOcrTracker.stats?.percentage, setStartPercentage]);
 
   // Format elapsed seconds as HH:MM:SS
   const formatTime = (seconds: number): string => {
@@ -890,10 +961,10 @@ function App() {
                     color: '#999',
                     textAlign: 'center'
                   }}>
-                    {targetDuration > 0 && trackingState === 'tracking' ? (
+                    {targetDuration > 0 && trackingState === 'tracking' && sessionStartTime ? (
                       (() => {
-                        const now = new Date();
-                        const targetTime = new Date(now.getTime() + (targetDuration * 60 - elapsedSeconds) * 1000);
+                        // Calculate target completion time based on session start time
+                        const targetTime = new Date(sessionStartTime + targetDuration * 60 * 1000);
                         const hours = Math.floor(targetDuration / 60);
                         const minutes = targetDuration % 60;
                         
@@ -1010,7 +1081,20 @@ function App() {
                     gap: '0',
                     lineHeight: '1.2'
                   }}>
-                    <div>현재: Lv.{parallelOcrTracker.stats?.level || '?'} ({parallelOcrTracker.stats?.percentage?.toFixed(2) || '0.00'}%)</div>
+                    <div>
+                      현재: Lv.{parallelOcrTracker.stats?.level || '?'} (
+                      {startPercentage !== null && parallelOcrTracker.stats?.percentage !== null ? (
+                        <>
+                          {startPercentage.toFixed(2)}% → {parallelOcrTracker.stats.percentage.toFixed(2)}%
+                        </>
+                      ) : (
+                        `${parallelOcrTracker.stats?.percentage?.toFixed(2) || '0.00'}%`
+                      )}
+                      {startPercentage !== null && parallelOcrTracker.stats?.percentage !== null && (
+                        <> | {(parallelOcrTracker.stats.percentage - startPercentage).toFixed(2)}%</>
+                      )}
+                      )
+                    </div>
                     <div>평균: {formatKoreanNumber(Math.floor((parallelOcrTracker.stats?.exp_per_hour || 0) / 3600))} (1초당)</div>
                   </div>
                 </div>

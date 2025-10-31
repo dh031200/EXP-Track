@@ -4,7 +4,7 @@ import type { Roi } from './tauri';
 /**
  * ROI type identifier matching Rust enum
  */
-export type RoiType = 'level' | 'exp' | 'hp' | 'mp' | 'meso';
+export type RoiType = 'level' | 'exp' | 'hp' | 'mp' | 'inventory' | 'meso';
 
 /**
  * Save ROI configuration for a specific type

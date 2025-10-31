@@ -13,7 +13,7 @@ use commands::config::{
 };
 use commands::ocr::{
     init_ocr_service, recognize_all_parallel, recognize_exp, recognize_hp_potion_count, recognize_level,
-    check_ocr_health,
+    check_ocr_health, auto_detect_rois,
     recognize_map, recognize_mp_potion_count,
 };
 use commands::screen_capture::{
@@ -28,7 +28,7 @@ use commands::tracking::{
 };
 use commands::session::{
     get_session_records, save_session_record, delete_session_record, update_session_title,
-    init_session_records, SessionRecordsState,
+    init_session_records,
 };
 use services::exp_calculator::ExpCalculator;
 use services::python_server::PythonServerManager;
@@ -172,6 +172,7 @@ pub fn run() {
             recognize_mp_potion_count,
             recognize_all_parallel,
             check_ocr_health,
+            auto_detect_rois,
             start_exp_session,
             add_exp_data,
             reset_exp_session,

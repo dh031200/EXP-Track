@@ -72,6 +72,7 @@ export function RoiManager({ onSelectingChange }: RoiManagerProps) {
     exp: null,
     hp: null,
     mp: null,
+    inventory: null,
   });
   const windowStateRef = useRef<WindowState | null>(null);
 
@@ -174,6 +175,10 @@ export function RoiManager({ onSelectingChange }: RoiManagerProps) {
         return hpRoi;
       case 'mp':
         return mpRoi;
+      case 'inventory':
+        return null; // Inventory is auto-detected, not stored in this manager
+      default:
+        return null;
     }
   };
 

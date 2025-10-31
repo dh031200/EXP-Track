@@ -123,63 +123,17 @@ impl OcrService {
     pub fn recognize_inventory(&self, image: &DynamicImage) -> Result<HashMap<String, u32>, String> {
         // Try Rust native template matching first
         if let Some(matcher) = &self.inventory_matcher {
-            #[cfg(debug_assertions)]
-            {
-                let t_start = std::time::Instant::now();
-                println!("🔍 Using Rust native inventory recognition (image: {}x{})", image.width(), image.height());
-
-                // Step 1: Detect inventory region (522x255) with coordinates
-                let t1 = std::time::Instant::now();
-                let detection_result = matcher.detect_inventory_region_with_coords(image);
-                let t2 = std::time::Instant::now();
-                println!("    ⏱️  detect_inventory_region_with_coords: {}ms", (t2 - t1).as_millis());
-
-                match detection_result {
-                    Ok((inventory_image, _coords)) => {
-                        // Step 2: Recognize all 8 slots
-                        let t3 = std::time::Instant::now();
-                        let recognition_result = matcher.recognize_all_slots(&inventory_image);
-                        let t4 = std::time::Instant::now();
-                        println!("    ⏱️  recognize_all_slots: {}ms", (t4 - t3).as_millis());
-
-                        match recognition_result {
-                            Ok(results) => {
-                                let t_end = std::time::Instant::now();
-                                println!("✅ Inventory recognition successful (total: {}ms): {:?}", (t_end - t_start).as_millis(), results);
-                                return Ok(results);
-                            }
-                            Err(e) => {
-                                eprintln!("❌ Slot recognition failed: {}", e);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("❌ Inventory region detection failed: {}", e);
+            match matcher.detect_inventory_region_with_coords(image) {
+                Ok((inventory_image, _coords)) => {
+                    if let Ok(results) = matcher.recognize_all_slots(&inventory_image) {
+                        return Ok(results);
                     }
                 }
+                Err(_) => {}
             }
-
-            #[cfg(not(debug_assertions))]
-            {
-                // Non-debug version without timing
-                match matcher.detect_inventory_region_with_coords(image) {
-                    Ok((inventory_image, _coords)) => {
-                        if let Ok(results) = matcher.recognize_all_slots(&inventory_image) {
-                            return Ok(results);
-                        }
-                    }
-                    Err(_) => {}
-                }
-            }
-        } else {
-            #[cfg(debug_assertions)]
-            println!("⚠️  Inventory matcher not initialized");
         }
 
         // Fallback: Return empty inventory (Python HTTP fallback can be added later if needed)
-        #[cfg(debug_assertions)]
-        println!("⚠️  Falling back to empty inventory");
-
         let mut empty = HashMap::new();
         for slot in &["shift", "ins", "home", "pup", "ctrl", "del", "end", "pdn"] {
             empty.insert(slot.to_string(), 0);
@@ -345,10 +299,98 @@ pub async fn check_ocr_health(state: State<'_, OcrServiceState>) -> Result<bool,
         let service = state.inner().lock();
         service.http_client.clone()
     };
-    
+
     match http_client.health_check().await {
         Ok(_) => Ok(true),
         Err(_) => Ok(false),
     }
+}
+
+use serde::Serialize;
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LevelBoxCoords {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AutoDetectResult {
+    pub level: Option<crate::models::roi::Roi>,
+    pub level_boxes: Option<Vec<LevelBoxCoords>>, // Matched digit box coordinates (1-3 boxes)
+    pub inventory: Option<crate::models::roi::Roi>,
+}
+
+/// Tauri command: Auto-detect Level and Inventory ROIs from full screen
+#[tauri::command]
+pub async fn auto_detect_rois(
+    ocr_state: State<'_, OcrServiceState>,
+    screen_state: State<'_, crate::commands::screen_capture::ScreenCaptureState>,
+) -> Result<AutoDetectResult, String> {
+    // Step 1: Capture full screen
+    let image_bytes = {
+        let state_guard = screen_state.inner().lock()
+            .map_err(|e| format!("Failed to lock screen state: {}", e))?;
+        let capture = state_guard.as_ref()
+            .ok_or("Screen capture not initialized")?;
+
+        let image = capture.capture_full()?;
+        crate::services::screen_capture::ScreenCapture::image_to_png_bytes(&image)?
+    };
+
+    // Convert bytes to DynamicImage
+    let image = image::load_from_memory(&image_bytes)
+        .map_err(|e| format!("Failed to load image: {}", e))?;
+
+    let mut result = AutoDetectResult {
+        level: None,
+        level_boxes: None,
+        inventory: None,
+    };
+
+    // Step 2: Detect Level ROI with matched boxes
+    {
+        let service = ocr_state.inner().lock();
+        if let Ok((left, top, right, bottom, matched_boxes)) = service.http_client.detect_level_roi_with_boxes(&image) {
+            result.level = Some(crate::models::roi::Roi::new(
+                left as i32,
+                top as i32,
+                right - left + 1,
+                bottom - top + 1,
+            ));
+
+            // Convert matched boxes to serializable format
+            result.level_boxes = Some(
+                matched_boxes.iter().map(|b| LevelBoxCoords {
+                    x: b.x,
+                    y: b.y,
+                    width: b.width,
+                    height: b.height,
+                }).collect()
+            );
+
+            println!("✅ Level ROI detected with {} digit boxes", matched_boxes.len());
+        }
+    }
+
+    // Step 3: Detect Inventory ROI
+    {
+        let service = ocr_state.inner().lock();
+        if let Some(matcher) = &service.inventory_matcher {
+            if let Ok((_, coords)) = matcher.detect_inventory_region_with_coords(&image) {
+                let (left, top, right, bottom) = coords;
+                result.inventory = Some(crate::models::roi::Roi::new(
+                    left as i32,
+                    top as i32,
+                    right - left + 1,
+                    bottom - top + 1,
+                ));
+            }
+        }
+    }
+
+    Ok(result)
 }
 

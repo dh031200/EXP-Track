@@ -8,6 +8,13 @@ export interface Roi {
   height: number;
 }
 
+export interface LevelBoxCoords {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 interface WindowState {
   width: number;
   height: number;
@@ -15,11 +22,24 @@ interface WindowState {
   y: number;
 }
 
+export interface AutoDetectResult {
+  level: Roi | null;
+  level_boxes: LevelBoxCoords[] | null;
+  inventory: Roi | null;
+}
+
 /**
  * Initialize screen capture with the primary monitor
  */
 export async function initScreenCapture(): Promise<void> {
   return invoke('init_screen_capture');
+}
+
+/**
+ * Auto-detect Level and Inventory ROIs from full screen capture
+ */
+export async function autoDetectRois(): Promise<AutoDetectResult> {
+  return invoke('auto_detect_rois');
 }
 
 /**

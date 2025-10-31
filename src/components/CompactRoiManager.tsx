@@ -7,6 +7,7 @@ import {
   maximizeWindowForROI,
   restoreWindow,
   initScreenCapture,
+  autoDetectRois,
   setAlwaysOnTop,
   type Roi,
 } from '../lib/tauri';
@@ -32,7 +33,7 @@ interface CompactRoiManagerProps {
 }
 
 const ROI_CONFIGS = [
-  { type: 'level' as RoiType, label: '레벨', icon: lvIcon, color: '#4CAF50', autoDetect: false },
+  { type: 'level' as RoiType, label: '레벨', icon: lvIcon, color: '#4CAF50', autoDetect: true },
   { type: 'exp' as RoiType, label: '경험치', icon: expIcon, color: '#2196F3', autoDetect: false },
   { type: 'inventory' as RoiType, label: '포션', icon: [hpIcon, mpIcon], color: '#FF5722', autoDetect: true },
   // { type: 'mapLocation' as RoiType, label: 'Map', icon: '🗺️', color: '#9C27B0' }, // Commented out temporarily
@@ -47,7 +48,7 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
   const [previewRoiType, setPreviewRoiType] = useState<RoiType | null>(null);
   const windowStateRef = useRef<WindowState | null>(null);
 
-  const { levelRoi, expRoi, setRoi, removeRoi, loadAllRois } = useRoiStore();
+  const { levelRoi, expRoi, inventoryRoi, setRoi, removeRoi, loadAllRois, getLevelBoxes } = useRoiStore();
 
   useEffect(() => {
     const init = async () => {
@@ -62,7 +63,9 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
     switch (type) {
       case 'level': return levelRoi;
       case 'exp': return expRoi;
+      case 'inventory': return inventoryRoi;
       // case 'mapLocation': return mapLocationRoi; // Commented out temporarily
+      default: return null;
     }
   };
 
@@ -132,11 +135,44 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
 
   const handleViewPreview = async (type: RoiType) => {
     try {
-      const imageData = await invoke<string>('get_roi_preview', { roiType: type });
-      setPreviewImage(imageData);
+      // Get the ROI configuration for this type
+      const roi = getRoi(type);
+
+      if (!roi) {
+        console.error('No ROI configured for type:', type);
+        return;
+      }
+
+      // For level ROI, use matched box coordinates if available (like inventory)
+      let captureRoi = roi;
+      if (type === 'level') {
+        const levelBoxes = getLevelBoxes();
+        if (levelBoxes && levelBoxes.length > 0) {
+          // Calculate bounding box from all matched digit boxes
+          const minX = Math.min(...levelBoxes.map(b => b.x));
+          const minY = Math.min(...levelBoxes.map(b => b.y));
+          const maxX = Math.max(...levelBoxes.map(b => b.x + b.width));
+          const maxY = Math.max(...levelBoxes.map(b => b.y + b.height));
+
+          // Add padding (10 pixels on each side)
+          const padding = 10;
+          captureRoi = {
+            x: Math.max(0, minX - padding),
+            y: Math.max(0, minY - padding),
+            width: maxX - minX + padding * 2,
+            height: maxY - minY + padding * 2,
+          };
+        }
+      }
+
+      // Capture the region in real-time
+      const bytes = await captureRegion(captureRoi);
+      const dataUrl = bytesToDataUrl(bytes);
+
+      setPreviewImage(dataUrl);
       setPreviewRoiType(type);
     } catch (err) {
-      console.error('Failed to load preview:', err);
+      console.error('Failed to capture preview:', err);
     }
   };
 
@@ -170,15 +206,17 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
               {ROI_CONFIGS.map(({ type, label, icon, color, autoDetect }) => {
                 const roi = getRoi(type);
                 const isConfigured = roi !== null;
+                // For auto-detect buttons, disable if ROI is not configured or invalid
+                const isAutoDetectDisabled = autoDetect && (!isConfigured || !roi || roi.width <= 0 || roi.height <= 0);
 
                 return (
                   <div key={type} className="roi-button-group">
                     <button
                       onClick={() => autoDetect ? handleViewPreview(type) : handleSelectClick(type)}
-                      disabled={!isInitialized}
+                      disabled={!isInitialized || isAutoDetectDisabled}
                       className="roi-select-btn"
                       style={{ borderColor: color }}
-                      title={autoDetect ? `${label} 자동 탐지 결과 보기` : `${label} 영역 ${isConfigured ? '재' : ''}선택`}
+                      title={autoDetect ? (isAutoDetectDisabled ? `${label} ROI 영역 미감지` : `${label} 자동 탐지 결과 보기`) : `${label} 영역 ${isConfigured ? '재' : ''}선택`}
                     >
                       {Array.isArray(icon) ? (
                         <div className="roi-icon-stack">

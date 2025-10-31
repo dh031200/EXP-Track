@@ -154,6 +154,13 @@
   margin-top: 12px;
 }
 
+.roi-init-error {
+  color: #d32f2f;
+  background: #ffebee;
+  border-radius: 6px;
+  font-weight: 500;
+}
+
 .spinner-small {
   width: 14px;
   height: 14px;
