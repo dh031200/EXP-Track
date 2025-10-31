@@ -358,6 +358,10 @@ impl InventoryTemplateMatcher {
         let roi = slot_rois.get(slot)
             .ok_or(format!("Invalid slot: {}", slot))?;
 
+        #[cfg(debug_assertions)]
+        println!("    🎯 Processing slot [{}]: ROI(x={}, y={}, w={}, h={})",
+            slot, roi.x, roi.y, roi.width, roi.height);
+
         // Convert to grayscale
         let gray = inventory_image.to_luma8();
 
@@ -449,6 +453,28 @@ impl InventoryTemplateMatcher {
 
                 // Template matching at current scale
                 let matches = self.match_template(&roi_image, &scaled_template, threshold);
+
+                // Debug: Print all attempts (matches and non-matches)
+                #[cfg(debug_assertions)]
+                {
+                    if !matches.is_empty() {
+                        let max_score = matches.iter().map(|(_, _, s)| s).fold(0.0f32, |a, &b| a.max(b));
+                        println!("      ✅ digit={}, scale={:.1}x, template={}: {} matches (max_score={:.3})",
+                            template.digit,
+                            scale,
+                            template.name,
+                            matches.len(),
+                            max_score
+                        );
+                    } else {
+                        println!("      ❌ digit={}, scale={:.1}x, template={}: no matches (threshold={})",
+                            template.digit,
+                            scale,
+                            template.name,
+                            threshold
+                        );
+                    }
+                }
 
                 // Convert to DigitDetection with scale info
                 matches.into_iter().map(|(x, y, score)| {
