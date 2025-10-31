@@ -160,7 +160,7 @@
 .settings-help {
   margin-top: 12px;
   margin-bottom: 0;
-  font-size: 12px;
+  font-size: 11px;
   color: #757575;
   line-height: 1.5;
   padding-left: 4px;
@@ -203,6 +203,17 @@
 
 .duration-select option {
   padding: 8px;
+}
+
+.potion-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.potion-item {
+  display: flex;
+  flex-direction: column;
 }
 
 .settings-actions {

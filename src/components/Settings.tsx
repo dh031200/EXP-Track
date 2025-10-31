@@ -136,46 +136,48 @@ export function Settings() {
           </div>
         )}
 
-        <div className="settings-item">
-          <label htmlFor="hp-slot-select" className="settings-label">
-            HP 포션 칸
-          </label>
-          <select
-            id="hp-slot-select"
-            value={hpSlot}
-            onChange={handleHpSlotChange}
-            className="duration-select"
-          >
-            {VALID_SLOTS.map(slot => (
-              <option key={slot} value={slot}>
-                {slot.toUpperCase()}
-              </option>
-            ))}
-          </select>
-          <p className="settings-help">
-            HP 포션이 있는 인벤토리 칸을 선택하세요.
-          </p>
-        </div>
+        <div className="potion-grid">
+          <div className="potion-item">
+            <label htmlFor="hp-slot-select" className="settings-label">
+              HP 포션 칸
+            </label>
+            <select
+              id="hp-slot-select"
+              value={hpSlot}
+              onChange={handleHpSlotChange}
+              className="duration-select"
+            >
+              {VALID_SLOTS.map(slot => (
+                <option key={slot} value={slot}>
+                  {slot.toUpperCase()}
+                </option>
+              ))}
+            </select>
+            <p className="settings-help">
+              HP 포션이 있는 단축키를 선택하세요.
+            </p>
+          </div>
 
-        <div className="settings-item">
-          <label htmlFor="mp-slot-select" className="settings-label">
-            MP 포션 칸
-          </label>
-          <select
-            id="mp-slot-select"
-            value={mpSlot}
-            onChange={handleMpSlotChange}
-            className="duration-select"
-          >
-            {VALID_SLOTS.map(slot => (
-              <option key={slot} value={slot}>
-                {slot.toUpperCase()}
-              </option>
-            ))}
-          </select>
-          <p className="settings-help">
-            MP 포션이 있는 인벤토리 칸을 선택하세요.
-          </p>
+          <div className="potion-item">
+            <label htmlFor="mp-slot-select" className="settings-label">
+              MP 포션 칸
+            </label>
+            <select
+              id="mp-slot-select"
+              value={mpSlot}
+              onChange={handleMpSlotChange}
+              className="duration-select"
+            >
+              {VALID_SLOTS.map(slot => (
+                <option key={slot} value={slot}>
+                  {slot.toUpperCase()}
+                </option>
+              ))}
+            </select>
+            <p className="settings-help">
+              MP 포션이 있는 단축키를 선택하세요.
+            </p>
+          </div>
         </div>
       </div>
 

@@ -318,7 +318,7 @@ function App() {
   const calculateLevelUpETA = (): string => {
     const stats = parallelOcrTracker.stats;
     if (!stats || !stats.level || stats.exp_per_hour === 0) {
-      return '−';
+      return '?시간 ?분';
     }
 
     // Official Mapleland EXP table (Levels 1-200)
@@ -350,14 +350,14 @@ function App() {
     
     // Validate level range
     if (currentLevel < 1 || currentLevel >= 200) {
-      return '−';
+      return '?시간 ?분';
     }
     
     // Get required exp for next level
     const requiredExp = expTable[currentLevel];
     
     if (!requiredExp) {
-      return '−';
+      return '?시간 ?분';
     }
     
     // Calculate remaining exp to next level
@@ -367,7 +367,7 @@ function App() {
     const hoursNeeded = remainingExp / stats.exp_per_hour;
     
     if (hoursNeeded < 0 || !isFinite(hoursNeeded)) {
-      return '−';
+      return '?시간 ?분';
     }
     
     // Format as hours and minutes
