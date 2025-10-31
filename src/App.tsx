@@ -96,14 +96,18 @@ function App() {
   // Check if any ROI is configured
   const hasAnyRoi = levelRoi !== null || expRoi !== null;
 
+  // Screen capture initialization state
+  const [screenCaptureReady, setScreenCaptureReady] = useState(false);
+
   // Initialize screen capture on app start
   useEffect(() => {
     const initCapture = async () => {
       try {
         await initScreenCapture();
-        console.log('Screen capture initialized successfully');
+        console.log('✅ Screen capture initialized successfully');
+        setScreenCaptureReady(true);
       } catch (error) {
-        console.error('Failed to initialize screen capture:', error);
+        console.error('❌ Failed to initialize screen capture:', error);
       }
     };
 
@@ -150,9 +154,12 @@ function App() {
     return () => clearInterval(interval);
   }, [ocrHealthy]);
 
-  // Auto-detect ROIs once OCR is healthy (one-time on app start)
+  // Auto-detect ROIs once everything is ready (one-time on app start)
   useEffect(() => {
-    if (!ocrHealthy || autoDetectCompleted) return;
+    // Wait for both screen capture and OCR to be ready
+    if (!screenCaptureReady || !ocrHealthy || autoDetectCompleted) return;
+
+    console.log('🚀 All systems ready, starting auto-detect...');
 
     const performAutoDetect = async () => {
       let attempts = 0;
@@ -195,7 +202,7 @@ function App() {
     };
 
     performAutoDetect();
-  }, [ocrHealthy, autoDetectCompleted]);
+  }, [screenCaptureReady, ocrHealthy, autoDetectCompleted]);
 
   // Timer effect - increment every second when tracking
   useEffect(() => {

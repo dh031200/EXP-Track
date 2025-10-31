@@ -184,15 +184,17 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
               {ROI_CONFIGS.map(({ type, label, icon, color, autoDetect }) => {
                 const roi = getRoi(type);
                 const isConfigured = roi !== null;
+                // For auto-detect buttons, disable if ROI is not configured or invalid
+                const isAutoDetectDisabled = autoDetect && (!isConfigured || !roi || roi.width <= 0 || roi.height <= 0);
 
                 return (
                   <div key={type} className="roi-button-group">
                     <button
                       onClick={() => autoDetect ? handleViewPreview(type) : handleSelectClick(type)}
-                      disabled={!isInitialized}
+                      disabled={!isInitialized || isAutoDetectDisabled}
                       className="roi-select-btn"
                       style={{ borderColor: color }}
-                      title={autoDetect ? `${label} 자동 탐지 결과 보기` : `${label} 영역 ${isConfigured ? '재' : ''}선택`}
+                      title={autoDetect ? (isAutoDetectDisabled ? `${label} ROI 영역 미감지` : `${label} 자동 탐지 결과 보기`) : `${label} 영역 ${isConfigured ? '재' : ''}선택`}
                     >
                       {Array.isArray(icon) ? (
                         <div className="roi-icon-stack">
