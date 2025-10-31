@@ -47,7 +47,7 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
   const [previewRoiType, setPreviewRoiType] = useState<RoiType | null>(null);
   const windowStateRef = useRef<WindowState | null>(null);
 
-  const { levelRoi, expRoi, setRoi, removeRoi, loadAllRois } = useRoiStore();
+  const { levelRoi, expRoi, inventoryRoi, setRoi, removeRoi, loadAllRois } = useRoiStore();
 
   useEffect(() => {
     const init = async () => {
@@ -62,7 +62,9 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
     switch (type) {
       case 'level': return levelRoi;
       case 'exp': return expRoi;
+      case 'inventory': return inventoryRoi;
       // case 'mapLocation': return mapLocationRoi; // Commented out temporarily
+      default: return null;
     }
   };
 
