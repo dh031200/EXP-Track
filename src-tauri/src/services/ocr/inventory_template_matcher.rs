@@ -405,8 +405,8 @@ impl InventoryTemplateMatcher {
         Ok(results)
     }
 
-    /// Detect all digits in ROI using single-scale template matching
-    /// (No multi-scale needed since inventory is standardized to 522x255)
+    /// Detect all digits in ROI using multi-scale template matching
+    /// Each digit is matched at multiple scales (0.6x-1.3x), keeping highest similarity per position
     fn detect_digits_in_roi(&self, gray: &GrayImage, roi: &SlotRoi) -> Result<Vec<DigitDetection>, String> {
         // Extract ROI
         let roi_image = image::imageops::crop_imm(
@@ -417,33 +417,49 @@ impl InventoryTemplateMatcher {
             roi.height,
         ).to_image();
 
-        // Single scale (1.0x) - inventory is already standardized
+        // Multi-scale matching (0.6x - 1.3x, 8 scales)
+        let scales = vec![0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3];
         let threshold = 0.7;
 
-        // Use rayon for parallel template matching across digits
         use rayon::prelude::*;
 
-        let all_detections: Vec<DigitDetection> = self.templates.par_iter()
-            .flat_map(|template| {
-                // Use template at original size (no scaling needed)
-                let (tmpl_width, tmpl_height) = template.image.dimensions();
+        // Generate all (template, scale) combinations
+        let combinations: Vec<_> = self.templates.iter()
+            .flat_map(|t| scales.iter().map(move |&s| (t, s)))
+            .collect();
 
-                if tmpl_width > roi.width || tmpl_height > roi.height {
+        // Parallel matching: each (digit, scale) combination tested independently
+        // NMS will select highest similarity per position across all scales
+        let all_detections: Vec<DigitDetection> = combinations.par_iter()
+            .flat_map(|(template, scale)| {
+                // Resize template to current scale
+                let scaled_width = (template.image.width() as f32 * *scale) as u32;
+                let scaled_height = (template.image.height() as f32 * *scale) as u32;
+
+                if scaled_width > roi.width || scaled_height > roi.height {
                     return Vec::new();
                 }
 
-                // Template matching at 1.0x scale
-                let matches = self.match_template(&roi_image, &template.image, threshold);
+                let scaled_template = image::imageops::resize(
+                    &template.image,
+                    scaled_width,
+                    scaled_height,
+                    image::imageops::FilterType::Nearest,
+                );
 
+                // Template matching at current scale
+                let matches = self.match_template(&roi_image, &scaled_template, threshold);
+
+                // Convert to DigitDetection with scale info
                 matches.into_iter().map(|(x, y, score)| {
                     DigitDetection {
                         digit: template.digit,
                         x: x + roi.x,
                         y: y + roi.y,
-                        width: tmpl_width,
-                        height: tmpl_height,
+                        width: scaled_width,
+                        height: scaled_height,
                         score,
-                        scale: 1.0,
+                        scale: *scale,
                     }
                 }).collect()
             })
