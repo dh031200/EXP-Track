@@ -12,7 +12,7 @@ import shutil
 from pathlib import Path
 from datetime import datetime
 from extract_inventory_final import extract_inventory_region
-from detect_numbers_rapidocr_autoscale import detect_numbers_in_image_roi
+from detect_numbers_roi import detect_numbers_in_image_roi
 
 
 def run_e2e_pipeline():

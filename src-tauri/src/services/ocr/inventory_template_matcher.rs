@@ -1,7 +1,9 @@
-use image::{DynamicImage, GrayImage, ImageBuffer, Luma, Rgb, RgbImage, imageops};
+use image::{DynamicImage, GrayImage, ImageBuffer, Luma, imageops};
 use std::path::Path;
 use std::collections::HashMap;
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
+use base64::{Engine as _, engine::general_purpose};
 
 /// Template for digit recognition (inventory numbers)
 #[derive(Debug, Clone)]
@@ -32,54 +34,105 @@ pub struct DigitDetection {
     pub scale: f32,
 }
 
+/// Proportion-based ROI for auto-scaling (like Python autoscale)
+#[derive(Debug, Clone, Copy)]
+pub struct SlotRoiProportion {
+    pub x_min: f32,
+    pub x_max: f32,
+    pub y_min: f32,
+    pub y_max: f32,
+}
+
+impl SlotRoiProportion {
+    /// Calculate absolute coordinates based on image dimensions
+    pub fn to_absolute(&self, width: u32, height: u32) -> SlotRoi {
+        SlotRoi {
+            x: (self.x_min * width as f32) as u32,
+            y: (self.y_min * height as f32) as u32,
+            width: ((self.x_max - self.x_min) * width as f32) as u32,
+            height: ((self.y_max - self.y_min) * height as f32) as u32,
+        }
+    }
+}
+
+/// ROI proportions (0.0 to 1.0) based on reference size 522x255
+/// Matches Python detect_numbers_rapidocr_autoscale.py ROI_PROPORTIONS
+const ROI_PROPORTIONS: &[(&str, SlotRoiProportion)] = &[
+    // Row 0 (top row): y=64-125 (height=61)
+    ("shift", SlotRoiProportion { x_min: 0.0000, x_max: 0.2490, y_min: 0.2510, y_max: 0.4902 }),
+    ("ins",   SlotRoiProportion { x_min: 0.2490, x_max: 0.5000, y_min: 0.2510, y_max: 0.4902 }),
+    ("home",  SlotRoiProportion { x_min: 0.5000, x_max: 0.7490, y_min: 0.2510, y_max: 0.4902 }),
+    ("pup",   SlotRoiProportion { x_min: 0.7490, x_max: 0.9981, y_min: 0.2510, y_max: 0.4902 }),
+    // Row 1 (bottom row): y=196-254 (height=58)
+    ("ctrl",  SlotRoiProportion { x_min: 0.0000, x_max: 0.2490, y_min: 0.7686, y_max: 0.9961 }),
+    ("del",   SlotRoiProportion { x_min: 0.2490, x_max: 0.5000, y_min: 0.7686, y_max: 0.9961 }),
+    ("end",   SlotRoiProportion { x_min: 0.5000, x_max: 0.7490, y_min: 0.7686, y_max: 0.9961 }),
+    ("pdn",   SlotRoiProportion { x_min: 0.7490, x_max: 0.9981, y_min: 0.7686, y_max: 0.9961 }),
+];
+
+/// OCR server request format
+#[derive(Serialize)]
+struct ImageRequest {
+    image_base64: String,
+}
+
+/// OCR server text box response
+#[derive(Deserialize, Debug)]
+struct TextBox {
+    #[serde(rename = "box")]
+    bbox: Vec<Vec<f64>>,
+    text: String,
+    score: f64,
+}
+
+/// OCR server response format
+#[derive(Deserialize, Debug)]
+struct OcrResponse {
+    boxes: Vec<TextBox>,
+    raw_text: String,
+}
+
 /// Inventory template matcher for potion counting
 pub struct InventoryTemplateMatcher {
     templates: Vec<InventoryTemplate>,
+    slot_rois: HashMap<String, SlotRoi>,
+    http_client: Option<reqwest::blocking::Client>,
+    ocr_base_url: String,
 }
 
 impl InventoryTemplateMatcher {
     /// Create a new inventory template matcher
     pub fn new() -> Self {
+        // Initialize HTTP client for OCR server communication
+        let http_client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .ok();
+
         Self {
             templates: Vec::new(),
+            slot_rois: Self::init_slot_rois(),
+            http_client,
+            ocr_base_url: "http://127.0.0.1:39835".to_string(),
         }
     }
 
-    /// Calculate slot ROIs dynamically based on actual inventory image size
-    /// Reference: 522x255px inventory with 4x2 grid layout
-    fn calculate_slot_rois(width: u32, height: u32) -> HashMap<String, SlotRoi> {
+    /// Initialize slot ROI mappings
+    /// Based on 522x255px inventory image with 4x2 grid layout
+    fn init_slot_rois() -> HashMap<String, SlotRoi> {
         let mut rois = HashMap::new();
 
-        // Row proportions (based on 522x255 reference)
-        // Row 0: y=64-125 → top=0.2510, bottom=0.4902
-        // Row 1: y=196-254 → top=0.7686, bottom=0.9961
-        let row0_top = (height as f32 * 0.2510) as u32;
-        let row0_bottom = (height as f32 * 0.4902) as u32;
-        let row1_top = (height as f32 * 0.7686) as u32;
-        let row1_bottom = (height as f32 * 0.9961) as u32;
+        // Row 0 (top row): y=64-125 (height=61)
+        rois.insert("shift".to_string(), SlotRoi { x: 0,   y: 64,  width: 130, height: 61 });
+        rois.insert("ins".to_string(),   SlotRoi { x: 130, y: 64,  width: 131, height: 61 });
+        rois.insert("home".to_string(),  SlotRoi { x: 261, y: 64,  width: 130, height: 61 });
+        rois.insert("pup".to_string(),   SlotRoi { x: 391, y: 64,  width: 130, height: 61 });
 
-        let row0_height = row0_bottom - row0_top;
-        let row1_height = row1_bottom - row1_top;
-
-        // Column proportions (based on 522 width reference)
-        // Boundaries: 0, 130, 261, 391, 521 → 0.0, 0.2490, 0.5000, 0.7491, 0.9981
-        let col0 = 0;
-        let col1 = (width as f32 * 0.2490) as u32;
-        let col2 = (width as f32 * 0.5000) as u32;
-        let col3 = (width as f32 * 0.7491) as u32;
-        let col4 = (width as f32 * 0.9981) as u32;
-
-        // Row 0 (top row)
-        rois.insert("shift".to_string(), SlotRoi { x: col0, y: row0_top, width: col1 - col0, height: row0_height });
-        rois.insert("ins".to_string(),   SlotRoi { x: col1, y: row0_top, width: col2 - col1, height: row0_height });
-        rois.insert("home".to_string(),  SlotRoi { x: col2, y: row0_top, width: col3 - col2, height: row0_height });
-        rois.insert("pup".to_string(),   SlotRoi { x: col3, y: row0_top, width: col4 - col3, height: row0_height });
-
-        // Row 1 (bottom row)
-        rois.insert("ctrl".to_string(),  SlotRoi { x: col0, y: row1_top, width: col1 - col0, height: row1_height });
-        rois.insert("del".to_string(),   SlotRoi { x: col1, y: row1_top, width: col2 - col1, height: row1_height });
-        rois.insert("end".to_string(),   SlotRoi { x: col2, y: row1_top, width: col3 - col2, height: row1_height });
-        rois.insert("pdn".to_string(),   SlotRoi { x: col3, y: row1_top, width: col4 - col3, height: row1_height });
+        // Row 1 (bottom row): y=196-254 (height=58)
+        rois.insert("ctrl".to_string(),  SlotRoi { x: 0,   y: 196, width: 130, height: 58 });
+        rois.insert("del".to_string(),   SlotRoi { x: 130, y: 196, width: 131, height: 58 });
+        rois.insert("end".to_string(),   SlotRoi { x: 261, y: 196, width: 130, height: 58 });
+        rois.insert("pdn".to_string(),   SlotRoi { x: 391, y: 196, width: 130, height: 58 });
 
         rois
     }
@@ -140,7 +193,6 @@ impl InventoryTemplateMatcher {
 
     /// Detect inventory region from full screenshot with debug info
     /// Returns (inventory_image, (left, top, right, bottom))
-    /// Note: Resizes to standard 522x255 for consistent template matching
     pub fn detect_inventory_region_with_coords(&self, image: &DynamicImage) -> Result<(DynamicImage, (u32, u32, u32, u32)), String> {
         // Step 1: Convert to grayscale
         let gray = image.to_luma8();
@@ -162,7 +214,7 @@ impl InventoryTemplateMatcher {
         let binary = GrayImage::from_raw(width, height, binary_data)
             .ok_or("Failed to create binary image from parallel processing")?;
 
-        // Step 3: Find candidate regions via connected components
+        // Step 3: Find candidate regions via connected components (morphology removed for speed)
         let candidates = self.find_candidate_regions(&binary)?;
 
         if candidates.is_empty() {
@@ -177,24 +229,23 @@ impl InventoryTemplateMatcher {
         let inv_width = right - left + 1;
         let inv_height = bottom - top + 1;
 
-        // Step 5: Crop inventory region from original grayscale
+        // Step 5: Crop inventory region FROM ORIGINAL GREYSCALE (same as Python line 177)
         let cropped_gray = imageops::crop_imm(&gray, *left, *top, inv_width, inv_height).to_image();
 
-        // Step 6: Resize to standard 522x255 for consistent template matching
-        // NEAREST preserves sharp edges for better digit recognition
+        // Step 6: Resize to standard 522x255 with NEAREST (same as Python line 181)
+        // IMPORTANT: Use Nearest (not Lanczos3) to preserve sharp edges for template matching
         let resized_gray = image::imageops::resize(
             &cropped_gray,
             522,
             255,
-            image::imageops::FilterType::Nearest,
+            image::imageops::FilterType::Nearest,  // Changed from Lanczos3 to Nearest
         );
 
-        // Step 7: Final threshold for OCR (threshold 20)
-        // Dark pixels (< 20) become white (255) - digits
-        // Bright pixels (≥ 20) become black (0) - background
+        // Step 7: Final threshold for OCR (threshold 1, same as Python line 186)
+        // Dark pixels (< 1) become white (255)
         let final_binary = ImageBuffer::from_fn(522, 255, |x, y| {
             let pixel = resized_gray.get_pixel(x, y);
-            if pixel[0] < 20 {
+            if pixel[0] < 1 {
                 Luma([255u8])  // Dark pixels → white
             } else {
                 Luma([0u8])    // Bright pixels → black
@@ -205,7 +256,7 @@ impl InventoryTemplateMatcher {
     }
 
     /// Detect inventory region from full screenshot
-    /// Returns 522x255 standardized inventory image
+    /// Returns 522x255px inventory image
     pub fn detect_inventory_region(&self, image: &DynamicImage) -> Result<DynamicImage, String> {
         let (inventory_image, _coords) = self.detect_inventory_region_with_coords(image)?;
         Ok(inventory_image)
@@ -353,22 +404,34 @@ impl InventoryTemplateMatcher {
     }
 
     /// Recognize potion count in specific slot
-    pub fn recognize_count_in_slot(&self, inventory_image: &DynamicImage, slot_rois: &HashMap<String, SlotRoi>, slot: &str) -> Result<u32, String> {
-        // Get ROI for slot
-        let roi = slot_rois.get(slot)
-            .ok_or(format!("Invalid slot: {}", slot))?;
-
+    pub fn recognize_count_in_slot(&self, inventory_image: &DynamicImage, slot: &str) -> Result<u32, String> {
         #[cfg(debug_assertions)]
-        println!("    🎯 Processing slot [{}]: ROI(x={}, y={}, w={}, h={})",
-            slot, roi.x, roi.y, roi.width, roi.height);
+        let t_start = std::time::Instant::now();
+
+        // Get ROI for slot
+        let roi = self.slot_rois.get(slot)
+            .ok_or(format!("Invalid slot: {}", slot))?;
 
         // Convert to grayscale
         let gray = inventory_image.to_luma8();
 
+        // Verify inventory image size
+        if gray.width() != 522 || gray.height() != 255 {
+            return Err(format!("Invalid inventory size: {}x{} (expected 522x255)", gray.width(), gray.height()));
+        }
+
+        #[cfg(debug_assertions)]
+        let t_prep = std::time::Instant::now();
+
         // Detect digits in ROI
-        let detections = self.detect_digits_in_roi(&gray, roi, slot)?;
+        let detections = self.detect_digits_in_roi(&gray, roi)?;
+
+        #[cfg(debug_assertions)]
+        let t_detect = std::time::Instant::now();
 
         if detections.is_empty() {
+            #[cfg(debug_assertions)]
+            println!("      📍 Slot '{}': 0 (empty, took {}ms)", slot, (t_detect - t_start).as_millis());
             return Ok(0); // Empty slot
         }
 
@@ -381,41 +444,56 @@ impl InventoryTemplateMatcher {
         let count = number_str.parse::<u32>()
             .map_err(|e| format!("Failed to parse potion count: {}", e))?;
 
+        #[cfg(debug_assertions)]
+        {
+            let t_end = std::time::Instant::now();
+            println!("      📍 Slot '{}': {} (prep: {}ms, detect: {}ms, total: {}ms)",
+                slot, count,
+                (t_prep - t_start).as_millis(),
+                (t_detect - t_prep).as_millis(),
+                (t_end - t_start).as_millis());
+        }
+
         Ok(count)
     }
 
     /// Recognize counts in all 8 inventory slots
     /// Returns HashMap with slot names as keys and item counts as values
     pub fn recognize_all_slots(&self, inventory_image: &DynamicImage) -> Result<HashMap<String, u32>, String> {
-        // Inventory image is always 522x255 after standardization
-        let slot_rois = Self::calculate_slot_rois(522, 255);
+        #[cfg(debug_assertions)]
+        let t_start = std::time::Instant::now();
+
+        // Verify inventory image size
+        let gray = inventory_image.to_luma8();
+        if gray.width() != 522 || gray.height() != 255 {
+            return Err(format!("Invalid inventory size: {}x{} (expected 522x255)", gray.width(), gray.height()));
+        }
+
+        #[cfg(debug_assertions)]
+        println!("    🎰 Processing 8 inventory slots...");
 
         let mut results = HashMap::new();
         let slots = vec!["shift", "ins", "home", "pup", "ctrl", "del", "end", "pdn"];
 
-        #[cfg(debug_assertions)]
-        println!("    📦 Inventory slots (522x255):");
-
         for slot in slots {
             // Recognize count in this slot, default to 0 if recognition fails
-            let count = self.recognize_count_in_slot(inventory_image, &slot_rois, slot).unwrap_or(0);
-
-            #[cfg(debug_assertions)]
-            println!("       {} = {}", slot, count);
-
+            let count = self.recognize_count_in_slot(inventory_image, slot).unwrap_or(0);
             results.insert(slot.to_string(), count);
+        }
+
+        #[cfg(debug_assertions)]
+        {
+            let t_end = std::time::Instant::now();
+            println!("    ✅ All slots processed in {}ms", (t_end - t_start).as_millis());
         }
 
         Ok(results)
     }
 
-    /// Detect all digits in ROI using coordinate-based direct extraction
-    /// Uses known digit positions based on center-alignment formula
-    fn detect_digits_in_roi(&self, gray: &GrayImage, roi: &SlotRoi, _slot_name: &str) -> Result<Vec<DigitDetection>, String> {
-        // Constants from coordinate analysis
-        const WIDTH_1: f32 = 18.68;
-        const WIDTH_OTHER: f32 = 30.0;
-        const HEIGHT: u32 = 42;
+    /// Detect all digits in ROI using multi-scale template matching
+    fn detect_digits_in_roi(&self, gray: &GrayImage, roi: &SlotRoi) -> Result<Vec<DigitDetection>, String> {
+        #[cfg(debug_assertions)]
+        let t_start = std::time::Instant::now();
 
         // Extract ROI
         let roi_image = image::imageops::crop_imm(
@@ -426,195 +504,410 @@ impl InventoryTemplateMatcher {
             roi.height,
         ).to_image();
 
-        // Step 1: Find number region (white pixels bounding box)
-        let number_bbox = match self.find_number_region(&roi_image) {
-            Some(bbox) => bbox,
-            None => return Ok(Vec::new()), // No digits found
-        };
-
-        let (bbox_x, bbox_y, bbox_width, bbox_height) = number_bbox;
-
         #[cfg(debug_assertions)]
-        println!("      📏 Number region: x={}, y={}, w={}, h={}", bbox_x, bbox_y, bbox_width, bbox_height);
+        let t_crop = std::time::Instant::now();
 
-        // Step 2: Estimate digit count from width
-        let digit_count = self.estimate_digit_count(bbox_width);
+        // Multi-scale template matching
+        let scales = vec![0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3];
+        let threshold = 0.7;
 
-        #[cfg(debug_assertions)]
-        println!("      🔢 Estimated digit count: {}", digit_count);
+        // Use rayon for parallel template matching across scales
+        use rayon::prelude::*;
 
-        if digit_count == 0 {
-            return Ok(Vec::new());
+        // Create all (template, scale) combinations for parallel processing
+        let mut combinations = Vec::new();
+        for template in &self.templates {
+            for &scale in &scales {
+                combinations.push((template, scale));
+            }
         }
 
-        // Step 3: Calculate start position (center alignment)
-        let start_x = bbox_x;
-        let start_y = bbox_y;
+        let all_detections: Vec<DigitDetection> = combinations.par_iter()
+            .flat_map(|(template, scale)| {
+                // Resize template
+                let (tmpl_width, tmpl_height) = template.image.dimensions();
+                let new_width = (tmpl_width as f32 * scale) as u32;
+                let new_height = (tmpl_height as f32 * scale) as u32;
 
-        // Step 4: Extract and match each digit position
-        let mut detections = Vec::new();
-        let mut current_x = start_x;
-
-        for digit_idx in 0..digit_count {
-            // Try both widths: 18.68 (digit 1) and 30.0 (others)
-            let candidates = vec![
-                (WIDTH_1, "narrow"),
-                (WIDTH_OTHER, "wide"),
-            ];
-
-            let mut best_match: Option<(u8, f32, f32)> = None; // (digit, score, width)
-
-            for (width, _width_type) in &candidates {
-                let digit_width = *width as u32;
-
-                // Check bounds
-                if current_x + digit_width > roi_image.width() {
-                    continue;
+                if new_width < 5 || new_height < 5 {
+                    return Vec::new();
+                }
+                if new_width > roi.width || new_height > roi.height {
+                    return Vec::new();
                 }
 
-                // Extract digit region
-                let digit_region = imageops::crop_imm(
-                    &roi_image,
-                    current_x,
-                    start_y,
-                    digit_width,
-                    HEIGHT.min(roi_image.height() - start_y),
-                ).to_image();
+                let scaled_template = image::imageops::resize(
+                    &template.image,
+                    new_width,
+                    new_height,
+                    image::imageops::FilterType::Lanczos3,  // High quality for accurate recognition
+                );
 
-                // Match against all templates
-                for template in &self.templates {
-                    // Resize template to match digit region size
-                    let resized_template = imageops::resize(
-                        &template.image,
-                        digit_region.width(),
-                        digit_region.height(),
-                        imageops::FilterType::Lanczos3,
-                    );
+                // Template matching
+                let matches = self.match_template(&roi_image, &scaled_template, threshold);
 
-                    let score = self.calculate_similarity(&digit_region, &resized_template);
-
-                    if score > best_match.as_ref().map(|(_, s, _)| *s).unwrap_or(0.0) {
-                        best_match = Some((template.digit, score, *width));
-                    }
-                }
-            }
-
-            // Accept if score >= 0.70
-            if let Some((digit, score, width)) = best_match {
-                if score >= 0.70 {
-                    #[cfg(debug_assertions)]
-                    println!("      ✅ Position {}: digit={}, score={:.3}, width={:.2}",
-                        digit_idx, digit, score, width);
-
-                    detections.push(DigitDetection {
-                        digit,
-                        x: current_x + roi.x,
-                        y: start_y + roi.y,
-                        width: width as u32,
-                        height: HEIGHT,
+                matches.into_iter().map(|(x, y, score)| {
+                    DigitDetection {
+                        digit: template.digit,
+                        x: x + roi.x,
+                        y: y + roi.y,
+                        width: new_width,
+                        height: new_height,
                         score,
-                        scale: 1.0,
-                    });
+                        scale: *scale,
+                    }
+                }).collect()
+            })
+            .collect();
 
-                    current_x += width as u32;
-                } else {
-                    #[cfg(debug_assertions)]
-                    println!("      ❌ Position {}: score too low ({:.3})", digit_idx, score);
-                    break;
+        #[cfg(debug_assertions)]
+        let t_matching_done = std::time::Instant::now();
+
+        // Apply NMS to remove overlapping detections
+        let filtered = self.non_maximum_suppression(all_detections, 0.05)?;
+
+        #[cfg(debug_assertions)]
+        let t_nms = std::time::Instant::now();
+
+        // Filter by height consistency
+        let height_filtered = self.filter_by_height(filtered, 0.2)?;
+
+        #[cfg(debug_assertions)]
+        {
+            let t_height = std::time::Instant::now();
+            println!("        🔍 detect_digits_in_roi breakdown:");
+            println!("           Crop: {}ms", (t_crop - t_start).as_millis());
+            println!("           Parallel matching (10 templates × 8 scales): {}ms", (t_matching_done - t_crop).as_millis());
+            println!("           NMS: {}ms", (t_nms - t_matching_done).as_millis());
+            println!("           Height filter: {}ms", (t_height - t_nms).as_millis());
+            println!("           Total: {}ms", (t_height - t_start).as_millis());
+        }
+
+        // Remove duplicates
+        let final_detections = self.remove_duplicates(height_filtered, 5)?;
+
+        Ok(final_detections)
+    }
+
+    /// Template matching using normalized cross-correlation
+    fn match_template(&self, image: &GrayImage, template: &GrayImage, threshold: f32) -> Vec<(u32, u32, f32)> {
+        let (img_width, img_height) = image.dimensions();
+        let (tmpl_width, tmpl_height) = template.dimensions();
+
+        if tmpl_width > img_width || tmpl_height > img_height {
+            return Vec::new();
+        }
+
+        let mut matches = Vec::new();
+
+        for y in 0..=(img_height - tmpl_height) {
+            for x in 0..=(img_width - tmpl_width) {
+                let score = self.calculate_ncc(image, template, x, y);
+                if score >= threshold {
+                    matches.push((x, y, score));
                 }
-            } else {
-                #[cfg(debug_assertions)]
-                println!("      ❌ Position {}: no match found", digit_idx);
-                break;
             }
         }
 
-        Ok(detections)
+        matches
     }
 
-    /// Find number region in ROI (white pixels bounding box)
-    fn find_number_region(&self, image: &GrayImage) -> Option<(u32, u32, u32, u32)> {
-        let (width, height) = image.dimensions();
+    /// Calculate normalized cross-correlation
+    fn calculate_ncc(&self, image: &GrayImage, template: &GrayImage, x: u32, y: u32) -> f32 {
+        let (tmpl_width, tmpl_height) = template.dimensions();
 
-        let mut min_x = width;
-        let mut max_x = 0;
-        let mut min_y = height;
-        let mut max_y = 0;
-        let mut found = false;
+        let mut sum_img = 0.0;
+        let mut sum_tmpl = 0.0;
+        let mut sum_img_sq = 0.0;
+        let mut sum_tmpl_sq = 0.0;
+        let mut sum_prod = 0.0;
+        let n = (tmpl_width * tmpl_height) as f32;
 
-        for y in 0..height {
-            for x in 0..width {
-                if image.get_pixel(x, y)[0] == 255 { // White pixel
-                    min_x = min_x.min(x);
-                    max_x = max_x.max(x);
-                    min_y = min_y.min(y);
-                    max_y = max_y.max(y);
-                    found = true;
-                }
+        for ty in 0..tmpl_height {
+            for tx in 0..tmpl_width {
+                let img_val = image.get_pixel(x + tx, y + ty)[0] as f32;
+                let tmpl_val = template.get_pixel(tx, ty)[0] as f32;
+
+                sum_img += img_val;
+                sum_tmpl += tmpl_val;
+                sum_img_sq += img_val * img_val;
+                sum_tmpl_sq += tmpl_val * tmpl_val;
+                sum_prod += img_val * tmpl_val;
             }
         }
 
-        if found {
-            let bbox_width = max_x - min_x + 1;
-            let bbox_height = max_y - min_y + 1;
-            Some((min_x, min_y, bbox_width, bbox_height))
-        } else {
-            None
-        }
-    }
+        let mean_img = sum_img / n;
+        let mean_tmpl = sum_tmpl / n;
 
-    /// Estimate digit count from number region width
-    fn estimate_digit_count(&self, width: u32) -> usize {
-        // Based on coordinate analysis:
-        // 1 digit: 18-30px
-        // 2 digits: 37-60px
-        // 3 digits: 56-90px
-        // 4 digits: 74-120px
+        let numer = sum_prod - n * mean_img * mean_tmpl;
+        let denom = ((sum_img_sq - n * mean_img * mean_img) * (sum_tmpl_sq - n * mean_tmpl * mean_tmpl)).sqrt();
 
-        if width >= 18 && width <= 30 {
-            1
-        } else if width >= 37 && width <= 60 {
-            2
-        } else if width >= 56 && width <= 90 {
-            3
-        } else if width >= 74 && width <= 120 {
-            4
-        } else {
-            0 // Invalid width
-        }
-    }
-
-    /// Calculate similarity between two images (exact pixel matching)
-    fn calculate_similarity(&self, img1: &GrayImage, img2: &GrayImage) -> f32 {
-        if img1.dimensions() != img2.dimensions() {
+        if denom == 0.0 {
             return 0.0;
         }
 
-        let total_pixels = (img1.width() * img1.height()) as f32;
-        let mut matched_pixels = 0;
+        (numer / denom).max(0.0)
+    }
 
-        for (p1, p2) in img1.pixels().zip(img2.pixels()) {
-            if p1[0] == p2[0] {
-                matched_pixels += 1;
+    /// Non-maximum suppression to remove overlapping detections
+    fn non_maximum_suppression(&self, mut detections: Vec<DigitDetection>, overlap_threshold: f32) -> Result<Vec<DigitDetection>, String> {
+        if detections.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Sort by score (descending)
+        detections.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
+
+        let mut kept = Vec::new();
+
+        for detection in detections {
+            let mut overlaps = false;
+
+            for kept_det in &kept {
+                let overlap_area = self.calculate_overlap(&detection, kept_det);
+                let min_area = (detection.width * detection.height).min(kept_det.width * kept_det.height) as f32;
+
+                if overlap_area > overlap_threshold * min_area {
+                    overlaps = true;
+                    break;
+                }
+            }
+
+            if !overlaps {
+                kept.push(detection);
             }
         }
 
-        (matched_pixels as f32 / total_pixels) * 100.0
+        Ok(kept)
     }
 
+    /// Calculate overlap area between two detections
+    fn calculate_overlap(&self, d1: &DigitDetection, d2: &DigitDetection) -> f32 {
+        let x_overlap = (d1.x + d1.width).min(d2.x + d2.width) as i32 - d1.x.max(d2.x) as i32;
+        let y_overlap = (d1.y + d1.height).min(d2.y + d2.height) as i32 - d1.y.max(d2.y) as i32;
+
+        if x_overlap > 0 && y_overlap > 0 {
+            (x_overlap * y_overlap) as f32
+        } else {
+            0.0
+        }
+    }
+
+    /// Filter detections by height consistency
+    fn filter_by_height(&self, detections: Vec<DigitDetection>, tolerance: f32) -> Result<Vec<DigitDetection>, String> {
+        if detections.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Calculate median height
+        let mut heights: Vec<u32> = detections.iter().map(|d| d.height).collect();
+        heights.sort();
+        let median_height = heights[heights.len() / 2];
+
+        // Filter detections within tolerance
+        let filtered: Vec<DigitDetection> = detections.into_iter()
+            .filter(|d| {
+                let diff = (d.height as i32 - median_height as i32).abs() as f32;
+                diff <= median_height as f32 * tolerance
+            })
+            .collect();
+
+        Ok(filtered)
+    }
+
+    /// Remove duplicate detections at same position
+    fn remove_duplicates(&self, mut detections: Vec<DigitDetection>, position_tolerance: u32) -> Result<Vec<DigitDetection>, String> {
+        if detections.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Sort by score (descending)
+        detections.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
+
+        let mut kept: Vec<DigitDetection> = Vec::new();
+
+        for detection in detections {
+            let mut is_duplicate = false;
+
+            for kept_det in &kept {
+                // Check position proximity
+                let x_diff = (detection.x as i32 - kept_det.x as i32).abs() as u32;
+                let y_diff = (detection.y as i32 - kept_det.y as i32).abs() as u32;
+
+                if x_diff <= position_tolerance && y_diff <= position_tolerance {
+                    is_duplicate = true;
+                    break;
+                }
+
+                // Check overlap
+                let overlap = self.calculate_overlap(&detection, kept_det);
+                let current_area = (detection.width * detection.height) as f32;
+                let kept_area = (kept_det.width * kept_det.height) as f32;
+
+                if overlap > 0.3 * current_area.min(kept_area) {
+                    is_duplicate = true;
+                    break;
+                }
+            }
+
+            if !is_duplicate {
+                kept.push(detection);
+            }
+        }
+
+        Ok(kept)
+    }
 
     /// Get available slot names
     pub fn get_available_slots(&self) -> Vec<String> {
-        vec![
-            "shift".to_string(),
-            "ins".to_string(),
-            "home".to_string(),
-            "pup".to_string(),
-            "ctrl".to_string(),
-            "del".to_string(),
-            "end".to_string(),
-            "pdn".to_string(),
-        ]
+        let mut slots: Vec<String> = self.slot_rois.keys().cloned().collect();
+        slots.sort();
+        slots
+    }
+
+    // ===== OCR-based Recognition Methods =====
+
+    /// Encode image to PNG base64 (same as http_ocr.rs)
+    fn encode_image_to_base64(image: &DynamicImage) -> Result<String, String> {
+        let mut buffer = Vec::new();
+        image
+            .write_to(&mut std::io::Cursor::new(&mut buffer), image::ImageFormat::Png)
+            .map_err(|e| format!("Failed to encode image: {}", e))?;
+        Ok(general_purpose::STANDARD.encode(&buffer))
+    }
+
+    /// Crop slot ROI from original RGB image using proportion-based coordinates (autoscale)
+    ///
+    /// IMPORTANT: This function expects the ORIGINAL RGB inventory image (430x212 cropped from screen),
+    /// NOT the processed binary image (522x255). The binary image is only used for region detection.
+    fn crop_slot_roi_from_original(original_inventory: &DynamicImage, slot: &str) -> Result<DynamicImage, String> {
+        let (width, height) = (original_inventory.width(), original_inventory.height());
+
+        // Find slot proportion
+        let proportion = ROI_PROPORTIONS
+            .iter()
+            .find(|(name, _)| *name == slot)
+            .map(|(_, prop)| prop)
+            .ok_or(format!("Invalid slot name: {}", slot))?;
+
+        // Calculate absolute coordinates (autoscale based on actual image size)
+        let x = (proportion.x_min * width as f32) as u32;
+        let y = (proportion.y_min * height as f32) as u32;
+        let crop_width = ((proportion.x_max - proportion.x_min) * width as f32) as u32;
+        let crop_height = ((proportion.y_max - proportion.y_min) * height as f32) as u32;
+
+        // Crop ROI from original RGB image (preserves color for RapidOCR)
+        let cropped = original_inventory.crop_imm(x, y, crop_width, crop_height);
+
+        Ok(cropped)
+    }
+
+    /// Call OCR server and parse number from response
+    fn call_ocr_server(&self, image: &DynamicImage) -> Result<String, String> {
+        let client = self.http_client.as_ref()
+            .ok_or("HTTP client not initialized")?;
+
+        let image_base64 = Self::encode_image_to_base64(image)?;
+        let url = format!("{}/ocr", self.ocr_base_url);
+
+        let response = client
+            .post(&url)
+            .json(&ImageRequest { image_base64 })
+            .send()
+            .map_err(|e| format!("OCR request failed: {}", e))?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(format!("OCR server error: {}", error_text));
+        }
+
+        let ocr_response: OcrResponse = response
+            .json()
+            .map_err(|e| format!("Failed to parse OCR response: {}", e))?;
+
+        // Extract digits only from raw_text
+        let digits: String = ocr_response.raw_text.chars().filter(|c| c.is_ascii_digit()).collect();
+
+        Ok(digits)
+    }
+
+    /// Recognize count in specific slot using OCR
+    ///
+    /// IMPORTANT: original_inventory must be the RGB image cropped from screen, NOT the binary processed image
+    fn recognize_count_in_slot_with_ocr_internal(&self, original_inventory: &DynamicImage, slot: &str) -> Result<u32, String> {
+        #[cfg(debug_assertions)]
+        let t_start = std::time::Instant::now();
+
+        // Crop slot ROI with autoscale from ORIGINAL RGB image
+        let slot_roi = Self::crop_slot_roi_from_original(original_inventory, slot)?;
+
+        #[cfg(debug_assertions)]
+        let t_crop = std::time::Instant::now();
+
+        // Call OCR server
+        let digits_str = self.call_ocr_server(&slot_roi)?;
+
+        #[cfg(debug_assertions)]
+        let t_ocr = std::time::Instant::now();
+
+        // Parse number
+        let count = if digits_str.is_empty() {
+            0
+        } else {
+            digits_str.parse::<u32>()
+                .map_err(|e| format!("Failed to parse count '{}': {}", digits_str, e))?
+        };
+
+        #[cfg(debug_assertions)]
+        {
+            let t_end = std::time::Instant::now();
+            println!(
+                "      📍 Slot '{}': {} (crop: {}ms, ocr: {}ms, total: {}ms)",
+                slot, count,
+                (t_crop - t_start).as_millis(),
+                (t_ocr - t_crop).as_millis(),
+                (t_end - t_start).as_millis()
+            );
+        }
+
+        Ok(count)
+    }
+
+    /// Recognize all 8 slots using OCR (parallel processing)
+    ///
+    /// IMPORTANT: original_inventory_image must be the RGB image cropped from full screen
+    pub fn recognize_all_slots_with_ocr(&self, original_inventory_image: &DynamicImage) -> Result<HashMap<String, u32>, String> {
+        #[cfg(debug_assertions)]
+        let t_start = std::time::Instant::now();
+
+        #[cfg(debug_assertions)]
+        println!("    🎰 Processing 8 inventory slots with OCR (from original RGB image)...");
+
+        let slots = vec!["shift", "ins", "home", "pup", "ctrl", "del", "end", "pdn"];
+
+        // Process slots in parallel using rayon
+        let results: Vec<(String, u32)> = slots
+            .par_iter()
+            .filter_map(|&slot| {
+                match self.recognize_count_in_slot_with_ocr_internal(original_inventory_image, slot) {
+                    Ok(count) => Some((slot.to_string(), count)),
+                    Err(_) => Some((slot.to_string(), 0)), // Default to 0 on error
+                }
+            })
+            .collect();
+
+        let mut results_map = HashMap::new();
+        for (slot, count) in results {
+            results_map.insert(slot, count);
+        }
+
+        #[cfg(debug_assertions)]
+        {
+            let t_end = std::time::Instant::now();
+            println!("    ✅ All slots processed with OCR in {}ms", (t_end - t_start).as_millis());
+        }
+
+        Ok(results_map)
     }
 }
 
@@ -623,14 +916,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_slot_rois_calculation() {
-        // Test with reference size 522x255
-        let slot_rois = InventoryTemplateMatcher::calculate_slot_rois(522, 255);
-        assert_eq!(slot_rois.len(), 8);
+    fn test_slot_rois_initialized() {
+        let matcher = InventoryTemplateMatcher::new();
+        assert_eq!(matcher.slot_rois.len(), 8);
 
         // Test specific slots
-        assert!(slot_rois.contains_key("shift"));
-        assert!(slot_rois.contains_key("pdn"));
+        assert!(matcher.slot_rois.contains_key("shift"));
+        assert!(matcher.slot_rois.contains_key("pdn"));
     }
 
     #[test]

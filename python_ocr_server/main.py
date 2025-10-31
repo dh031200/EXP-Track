@@ -206,7 +206,9 @@ def _run_ocr_sync(image: np.ndarray, engine_idx: int) -> tuple[List[TextBox], st
     engine = ocr_engines[engine_idx]
 
     # RapidOCR returns a RapidOCROutput object with txts, boxes, scores attributes
-    ocr_output = engine(image, text_score=0.85)
+    # Lower text_score to detect more text (especially small/faint digits)
+    # 0.6 = good balance between detection and false positives
+    ocr_output = engine(image, text_score=0.6)
 
     # Extract structured data from RapidOCROutput
     boxes = []

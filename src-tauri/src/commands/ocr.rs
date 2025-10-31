@@ -118,22 +118,48 @@ impl OcrService {
         self.http_client.recognize_mp_potion_count(image).await
     }
 
-    /// Recognize all 8 inventory slots (Rust native implementation)
+    /// Recognize all 8 inventory slots using OCR
     /// Returns HashMap with slot names as keys and item counts as values
     pub fn recognize_inventory(&self, image: &DynamicImage) -> Result<HashMap<String, u32>, String> {
-        // Try Rust native template matching first
         if let Some(matcher) = &self.inventory_matcher {
+            // Step 1: Detect inventory region coordinates (but we need original RGB, not processed binary)
             match matcher.detect_inventory_region_with_coords(image) {
-                Ok((inventory_image, _coords)) => {
-                    if let Ok(results) = matcher.recognize_all_slots(&inventory_image) {
-                        return Ok(results);
+                Ok((_binary_image, coords)) => {
+                    let (left, top, right, bottom) = coords;
+                    let width = right - left + 1;
+                    let height = bottom - top + 1;
+
+                    // Step 2: Crop ORIGINAL RGB image at detected coordinates (NOT the binary processed image)
+                    let original_rgb_inventory = image.crop_imm(left, top, width, height);
+
+                    #[cfg(debug_assertions)]
+                    println!("    📸 Cropped original RGB inventory: {}x{}", width, height);
+
+                    // Step 3: Use OCR-based recognition with ORIGINAL RGB image
+                    match matcher.recognize_all_slots_with_ocr(&original_rgb_inventory) {
+                        Ok(results) => return Ok(results),
+                        Err(e) => {
+                            #[cfg(debug_assertions)]
+                            eprintln!("❌ OCR recognition failed: {}", e);
+
+                            // Fallback to template matching with binary image
+                            let binary_image = matcher.detect_inventory_region(image)?;
+                            if let Ok(results) = matcher.recognize_all_slots(&binary_image) {
+                                #[cfg(debug_assertions)]
+                                println!("✅ Fallback to template matching succeeded");
+                                return Ok(results);
+                            }
+                        }
                     }
                 }
-                Err(_) => {}
+                Err(e) => {
+                    #[cfg(debug_assertions)]
+                    eprintln!("❌ Inventory region detection failed: {}", e);
+                }
             }
         }
 
-        // Fallback: Return empty inventory (Python HTTP fallback can be added later if needed)
+        // Final fallback: Return empty inventory
         let mut empty = HashMap::new();
         for slot in &["shift", "ins", "home", "pup", "ctrl", "del", "end", "pdn"] {
             empty.insert(slot.to_string(), 0);

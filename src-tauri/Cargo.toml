@@ -33,7 +33,7 @@ regex = "1.10"
 # Async synchronization
 parking_lot = "0.12"
 # HTTP client for Python OCR server
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", features = ["json", "blocking"] }
 # Parallel processing
 rayon = "1.10"
 
