@@ -13,6 +13,8 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 use tokio::time::sleep;
+use image::DynamicImage;
+use std::fs;
 
 /// Current tracking statistics
 #[derive(Debug, Clone, Serialize)]
@@ -522,9 +524,13 @@ impl OcrTracker {
                                         Ok(results) => {
                                             // Try to get ROI coordinates for memoization
                                             if let Some(matcher) = &service.inventory_matcher {
-                                                if let Ok((_, coords)) = matcher.detect_inventory_region_with_coords(&*image) {
+                                                if let Ok((inv_image, coords)) = matcher.detect_inventory_region_with_coords(&*image) {
                                                     #[cfg(debug_assertions)]
                                                     println!("💾 Memoizing Inventory ROI: {:?}", coords);
+                                                    
+                                                    // Save inventory preview image
+                                                    save_inventory_preview(&inv_image);
+                                                    
                                                     return Ok((results, Some(coords)));
                                                 }
                                             }
@@ -969,4 +975,15 @@ impl OcrTracker {
             println!("⏹️  Health check loop stopped");
         });
     }
+}
+
+/// Helper function to save inventory preview image
+fn save_inventory_preview(image: &DynamicImage) {
+    let temp_dir = std::env::temp_dir().join("exp-tracker-previews");
+    if fs::create_dir_all(&temp_dir).is_err() {
+        return;
+    }
+
+    let file_path = temp_dir.join("inventory_preview.png");
+    let _ = image.save(&file_path);
 }

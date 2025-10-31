@@ -17,6 +17,8 @@ import './CompactRoiManager.css';
 // Import icons
 import lvIcon from '/icons/lv.png';
 import expIcon from '/icons/exp.png';
+import hpIcon from '/icons/hp.png';
+import mpIcon from '/icons/mp.png';
 
 interface WindowState {
   width: number;
@@ -30,8 +32,9 @@ interface CompactRoiManagerProps {
 }
 
 const ROI_CONFIGS = [
-  { type: 'level' as RoiType, label: 'Level', icon: lvIcon, color: '#4CAF50' },
-  { type: 'exp' as RoiType, label: 'EXP', icon: expIcon, color: '#2196F3' },
+  { type: 'level' as RoiType, label: '레벨', icon: lvIcon, color: '#4CAF50', autoDetect: false },
+  { type: 'exp' as RoiType, label: '경험치', icon: expIcon, color: '#2196F3', autoDetect: false },
+  { type: 'inventory' as RoiType, label: '포션', icon: [hpIcon, mpIcon], color: '#FF5722', autoDetect: true },
   // { type: 'mapLocation' as RoiType, label: 'Map', icon: '🗺️', color: '#9C27B0' }, // Commented out temporarily
   // { type: 'meso' as RoiType, label: 'Meso', icon: '💰', color: '#FF9800' }, // Commented out temporarily
 ];
@@ -164,25 +167,34 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
           {/* Buttons Container */}
           <div className={`roi-buttons-container ${previewImage ? 'slide-out' : ''}`}>
             <div className="roi-buttons">
-              {ROI_CONFIGS.map(({ type, label, icon, color }) => {
+              {ROI_CONFIGS.map(({ type, label, icon, color, autoDetect }) => {
                 const roi = getRoi(type);
                 const isConfigured = roi !== null;
 
                 return (
                   <div key={type} className="roi-button-group">
                     <button
-                      onClick={() => handleSelectClick(type)}
+                      onClick={() => autoDetect ? handleViewPreview(type) : handleSelectClick(type)}
                       disabled={!isInitialized}
                       className="roi-select-btn"
                       style={{ borderColor: color }}
-                      title={`${label} 영역 ${isConfigured ? '재' : ''}선택`}
+                      title={autoDetect ? `${label} 자동 탐지 결과 보기` : `${label} 영역 ${isConfigured ? '재' : ''}선택`}
                     >
-                      <img src={icon} alt={label} className="roi-icon-img" />
+                      {Array.isArray(icon) ? (
+                        <div className="roi-icon-stack">
+                          <img src={icon[0]} alt="HP" className="roi-icon-img-stacked roi-icon-img-back" />
+                          <img src={icon[1]} alt="MP" className="roi-icon-img-stacked roi-icon-img-front" />
+                        </div>
+                      ) : typeof icon === 'string' && icon.length <= 2 ? (
+                        <span style={{ fontSize: '24px' }}>{icon}</span>
+                      ) : (
+                        <img src={icon as string} alt={label} className="roi-icon-img" />
+                      )}
                       <span className="roi-label">{label}</span>
-                      {isConfigured && <span className="roi-check">✓</span>}
+                      {autoDetect ? <span className="roi-auto-badge">자동</span> : isConfigured && <span className="roi-check">✓</span>}
                     </button>
 
-                    {isConfigured && (
+                    {isConfigured && !autoDetect && (
                       <div className="roi-actions-compact">
                         <button
                           onClick={() => handleViewPreview(type)}

@@ -59,6 +59,30 @@
   flex-shrink: 0;
 }
 
+.roi-icon-stack {
+  position: relative;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.roi-icon-img-stacked {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
+
+.roi-icon-img-back {
+  top: 0;
+  left: -4px;
+}
+
+.roi-icon-img-front {
+  top: 0;
+  left: 4px;
+}
+
 .roi-label {
   flex: 1;
   text-align: left;
@@ -69,6 +93,17 @@
   font-size: 16px;
   color: #4CAF50;
   flex-shrink: 0;
+}
+
+.roi-auto-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  background: #64B5F6;
+  color: white;
+  border-radius: 10px;
+  font-weight: 600;
+  flex-shrink: 0;
+  letter-spacing: 0.3px;
 }
 
 .roi-actions-compact {

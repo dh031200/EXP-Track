@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware';
 import type { Roi } from '../lib/tauri';
 import { saveRoi, loadRoi, clearRoi } from '../lib/roiCommands';
 
-export type RoiType = 'level' | 'exp'; // | 'mapLocation' - commented out temporarily
+export type RoiType = 'level' | 'exp' | 'inventory'; // | 'mapLocation' - commented out temporarily
 
 interface RoiState {
   // Current ROI configurations
