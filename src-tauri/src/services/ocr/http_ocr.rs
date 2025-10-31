@@ -315,28 +315,26 @@ impl HttpOcrClient {
         if let Some(matcher) = &self.template_matcher {
             let matcher = Arc::clone(matcher);
             let image = image.clone();
-            
+
             // Run blocking template matching in dedicated thread pool
             let result = tokio::task::spawn_blocking(move || {
                 matcher.recognize_level(&image)
             }).await.map_err(|e| format!("Template matching task failed: {}", e))?;
-            
+
             match result {
                 Ok(level) => {
-                    println!("⚡ Level {} recognized via template matching", level);
                     return Ok(LevelResult {
                         level,
                         raw_text: format!("LV. {}", level),
                     });
                 }
-                Err(e) => {
-                    println!("⚠️  Template matching failed: {}, falling back to RapidOCR", e);
+                Err(_e) => {
+                    // Fall back to RapidOCR
                 }
             }
         }
 
         // Fall back to RapidOCR
-        println!("🔄 Using RapidOCR for level recognition");
         let text = self.recognize_text(image).await?;
         let level = Self::parse_level(&text)?;
 

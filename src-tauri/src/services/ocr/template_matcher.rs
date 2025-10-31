@@ -200,35 +200,7 @@ impl TemplateMatcher {
         (exact_match as f32 / total_pixels) * 100.0
     }
 
-    /// Get best matching digit without threshold check (for debugging)
-    /// Returns (digit, similarity)
-    pub fn get_best_match(&self, digit_image: &GrayImage) -> Result<(u8, f32), String> {
-        let mut max_similarity = 0.0;
-        let mut best_digit = 0;
-
-        let (target_width, target_height) = digit_image.dimensions();
-
-        for template in &self.templates {
-            // Resize template to match digit_image size using NEAREST interpolation
-            let resized_template = image::imageops::resize(
-                &template.image,
-                target_width,
-                target_height,
-                image::imageops::FilterType::Nearest,
-            );
-
-            let similarity = self.calculate_similarity(digit_image, &resized_template);
-
-            if similarity > max_similarity {
-                max_similarity = similarity;
-                best_digit = template.digit;
-            }
-        }
-
-        Ok((best_digit, max_similarity))
-    }
-
-    /// Match digit with highest similarity template (must be >= 95%)
+    /// Match digit with highest similarity template (must be >= 92.5%)
     /// Templates are resized to match digit_image dimensions
     pub fn match_digit(&self, digit_image: &GrayImage) -> Result<Option<DigitMatch>, String> {
         let mut max_similarity = 0.0;
@@ -271,33 +243,15 @@ impl TemplateMatcher {
     /// Recognize level number from image and return matched box coordinates
     /// Returns (level, matched_boxes) where matched_boxes are the successfully recognized digit boxes
     pub fn recognize_level_with_boxes(&self, image: &DynamicImage) -> Result<(u32, Vec<BoundingBox>), String> {
-        // Debug: Save original image
-        let debug_dir = std::env::temp_dir().join("exp-tracker-debug");
-        std::fs::create_dir_all(&debug_dir).ok();
-
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis();
-
-        image.save(debug_dir.join(format!("{}_1_original.png", timestamp))).ok();
-
         // Find orange boxes
         let mask = self.extract_orange_boxes(image)?;
-
-        // Debug: Save HSV mask
-        DynamicImage::ImageLuma8(mask.clone())
-            .save(debug_dir.join(format!("{}_2_hsv_mask.png", timestamp))).ok();
 
         // Find boxes
         let mut boxes = self.find_digit_boxes(&mask)?;
 
         if boxes.is_empty() {
-            println!("❌ No digit boxes found in HSV mask");
             return Err("No digit boxes found".to_string());
         }
-
-        println!("✅ Found {} digit boxes", boxes.len());
 
         // Sort left to right
         boxes.sort_by_key(|b| b.x);
@@ -306,7 +260,7 @@ impl TemplateMatcher {
         let mut digits = Vec::new();
         let mut matched_boxes = Vec::new(); // Track successfully matched boxes
 
-        for (idx, bbox) in boxes.iter().enumerate() {
+        for (_idx, bbox) in boxes.iter().enumerate() {
             // Extract box without padding
             let box_img = image.crop_imm(
                 bbox.x,
@@ -315,28 +269,17 @@ impl TemplateMatcher {
                 bbox.height,
             );
 
-            // Debug: Save box image
-            box_img.save(debug_dir.join(format!("{}_3_box_{}.png", timestamp, idx))).ok();
-
             // Check width/height ratio after crop (0.79 ~ 0.91)
             let w_h_ratio = bbox.width as f32 / bbox.height as f32;
             const MIN_WH_RATIO: f32 = 0.79;
             const MAX_WH_RATIO: f32 = 0.91;
 
             if w_h_ratio < MIN_WH_RATIO || w_h_ratio > MAX_WH_RATIO {
-                println!("⚠️  Box {} skipped: w/h ratio={:.3} out of range [{:.2}~{:.2}]",
-                    idx, w_h_ratio, MIN_WH_RATIO, MAX_WH_RATIO);
                 continue;
             }
 
-            println!("✅ Box {} w/h ratio: {:.3} ({}x{})", idx, w_h_ratio, bbox.width, bbox.height);
-
             // Extract white digit
             let white_digit = self.extract_white_digit(&box_img)?;
-
-            // Debug: Save white digit
-            DynamicImage::ImageLuma8(white_digit.clone())
-                .save(debug_dir.join(format!("{}_4_white_digit_{}.png", timestamp, idx))).ok();
 
             // Check white pixel ratio (7.5% ~ 21.5%)
             const MIN_WHITE_RATIO: f32 = 7.5;
@@ -346,10 +289,7 @@ impl TemplateMatcher {
             let white_pixels = white_digit.pixels().filter(|p| p[0] == 255).count() as f32;
             let white_ratio = (white_pixels / total_pixels) * 100.0;
 
-            println!("📊 Box {}: white_ratio={:.2}% ({}x{})", idx, white_ratio, bbox.width, bbox.height);
-
             if white_ratio < MIN_WHITE_RATIO || white_ratio > MAX_WHITE_RATIO {
-                println!("⚠️  Box {} skipped: white_ratio out of range", idx);
                 continue; // Skip this box
             }
 
@@ -357,21 +297,16 @@ impl TemplateMatcher {
             match self.match_digit(&white_digit)? {
                 Some(mut digit_match) => {
                     digit_match.position = (bbox.x, bbox.y);
-                    println!("✅ Box {} matched: digit={}, similarity={:.2}%", idx, digit_match.digit, digit_match.similarity);
                     digits.push(digit_match.digit);
                     matched_boxes.push(bbox.clone()); // Save successfully matched box
                 }
                 None => {
-                    // Get best match even if below threshold
-                    let (best_digit, best_similarity) = self.get_best_match(&white_digit)?;
-                    println!("❌ Box {} failed: best match was digit={}, similarity={:.2}% (threshold: 92.5%)",
-                        idx, best_digit, best_similarity);
+                    // Skip box if no match
                 }
             }
         }
 
         if digits.is_empty() {
-            println!("❌ No digits matched with sufficient similarity");
             return Err("No digits matched with sufficient similarity".to_string());
         }
 
@@ -382,12 +317,8 @@ impl TemplateMatcher {
 
         // Validate level range (1-300 for MapleStory)
         if level < 1 || level > 300 {
-            println!("❌ Invalid level range: {} (expected 1-300)", level);
             return Err(format!("Invalid level range: {} (expected 1-300)", level));
         }
-
-        println!("🎯 Final recognized level: {} (matched {} boxes)", level, matched_boxes.len());
-        println!("📂 Debug images saved to: {}", debug_dir.display());
 
         Ok((level, matched_boxes))
     }
