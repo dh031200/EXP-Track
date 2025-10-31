@@ -255,8 +255,8 @@ impl TemplateMatcher {
             }
         }
 
-        // Reject if similarity is below 95%
-        if max_similarity < 95.0 {
+        // Reject if similarity is below 92.5%
+        if max_similarity < 92.5 {
             return Ok(None);
         }
 
@@ -361,7 +361,7 @@ impl TemplateMatcher {
                 None => {
                     // Get best match even if below threshold
                     let (best_digit, best_similarity) = self.get_best_match(&white_digit)?;
-                    println!("❌ Box {} failed: best match was digit={}, similarity={:.2}% (threshold: 95.0%)",
+                    println!("❌ Box {} failed: best match was digit={}, similarity={:.2}% (threshold: 92.5%)",
                         idx, best_digit, best_similarity);
                 }
             }
