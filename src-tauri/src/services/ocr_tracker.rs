@@ -532,8 +532,9 @@ impl OcrTracker {
                                                     let (left, top, right, bottom) = coords;
                                                     let width = right - left + 1;
                                                     let height = bottom - top + 1;
-                                                    let cropped_original = image::imageops::crop_imm(&*image, left, top, width, height).to_image();
-                                                    save_inventory_preview(&DynamicImage::ImageRgb8(cropped_original));
+                                                    let cropped_original = image::imageops::crop_imm(&*image, left, top, width, height);
+                                                    let dynamic_img = DynamicImage::ImageRgba8(cropped_original.to_image());
+                                                    save_inventory_preview(&dynamic_img);
                                                     
                                                     return Ok((results, Some(coords)));
                                                 }
