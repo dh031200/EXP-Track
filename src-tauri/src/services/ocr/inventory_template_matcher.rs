@@ -612,21 +612,21 @@ impl InventoryTemplateMatcher {
             Self::draw_rect(&mut rgb_image, *x, *y, tmpl_width, tmpl_height, green, 1);
         }
 
-        // Save to debug directory
-        let debug_dir = std::path::Path::new("/tmp/inventory_debug");
-        std::fs::create_dir_all(debug_dir).ok();
+        // Save to debug directory (cross-platform)
+        let temp_dir = std::env::temp_dir();
+        let debug_dir = temp_dir.join("inventory_debug");
+        std::fs::create_dir_all(&debug_dir).ok();
 
-        let filename = format!("{}/{}_{}_matches_{}.png",
-            debug_dir.display(),
+        let filename = debug_dir.join(format!("{}_{}_matches_{}.png",
             slot_name,
             template_name,
             matches.len()
-        );
+        ));
 
         rgb_image.save(&filename).ok();
 
         #[cfg(debug_assertions)]
-        println!("      💾 Debug image saved: {}", filename);
+        println!("      💾 Debug image saved: {}", filename.display());
     }
 
     /// Non-maximum suppression to remove overlapping detections
