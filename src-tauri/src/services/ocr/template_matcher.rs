@@ -238,15 +238,33 @@ impl TemplateMatcher {
 
     /// Recognize level number from image
     pub fn recognize_level(&self, image: &DynamicImage) -> Result<u32, String> {
+        // Debug: Save original image
+        let debug_dir = std::env::temp_dir().join("exp-tracker-debug");
+        std::fs::create_dir_all(&debug_dir).ok();
+
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
+
+        image.save(debug_dir.join(format!("{}_1_original.png", timestamp))).ok();
+
         // Find orange boxes
         let mask = self.extract_orange_boxes(image)?;
+
+        // Debug: Save HSV mask
+        DynamicImage::ImageLuma8(mask.clone())
+            .save(debug_dir.join(format!("{}_2_hsv_mask.png", timestamp))).ok();
 
         // Find boxes
         let mut boxes = self.find_digit_boxes(&mask)?;
 
         if boxes.is_empty() {
+            println!("❌ No digit boxes found in HSV mask");
             return Err("No digit boxes found".to_string());
         }
+
+        println!("✅ Found {} digit boxes", boxes.len());
 
         // Sort left to right
         boxes.sort_by_key(|b| b.x);
@@ -254,7 +272,7 @@ impl TemplateMatcher {
         // Match each digit
         let mut digits = Vec::new();
 
-        for bbox in boxes.iter() {
+        for (idx, bbox) in boxes.iter().enumerate() {
             // Extract box without padding
             let box_img = image.crop_imm(
                 bbox.x,
@@ -263,8 +281,15 @@ impl TemplateMatcher {
                 bbox.height,
             );
 
+            // Debug: Save box image
+            box_img.save(debug_dir.join(format!("{}_3_box_{}.png", timestamp, idx))).ok();
+
             // Extract white digit
             let white_digit = self.extract_white_digit(&box_img)?;
+
+            // Debug: Save white digit
+            DynamicImage::ImageLuma8(white_digit.clone())
+                .save(debug_dir.join(format!("{}_4_white_digit_{}.png", timestamp, idx))).ok();
 
             // Check white pixel ratio (9% ~ 21.5%)
             const MIN_WHITE_RATIO: f32 = 9.0;
@@ -274,21 +299,28 @@ impl TemplateMatcher {
             let white_pixels = white_digit.pixels().filter(|p| p[0] == 255).count() as f32;
             let white_ratio = (white_pixels / total_pixels) * 100.0;
 
+            println!("📊 Box {}: white_ratio={:.2}% ({}x{})", idx, white_ratio, bbox.width, bbox.height);
+
             if white_ratio < MIN_WHITE_RATIO || white_ratio > MAX_WHITE_RATIO {
+                println!("⚠️  Box {} skipped: white_ratio out of range", idx);
                 continue; // Skip this box
             }
 
             // Match digit
             if let Some(mut digit_match) = self.match_digit(&white_digit)? {
                 digit_match.position = (bbox.x, bbox.y);
+                println!("✅ Box {} matched: digit={}, similarity={:.2}%", idx, digit_match.digit, digit_match.similarity);
                 digits.push(digit_match.digit);
+            } else {
+                println!("❌ Box {} failed: no match with sufficient similarity", idx);
             }
         }
 
         if digits.is_empty() {
+            println!("❌ No digits matched with sufficient similarity");
             return Err("No digits matched with sufficient similarity".to_string());
         }
-        
+
         // Combine digits to form level number
         let level_str: String = digits.iter().map(|d| d.to_string()).collect();
         let level = level_str.parse::<u32>()
@@ -296,8 +328,12 @@ impl TemplateMatcher {
 
         // Validate level range (1-300 for MapleStory)
         if level < 1 || level > 300 {
+            println!("❌ Invalid level range: {} (expected 1-300)", level);
             return Err(format!("Invalid level range: {} (expected 1-300)", level));
         }
+
+        println!("🎯 Final recognized level: {}", level);
+        println!("📂 Debug images saved to: {}", debug_dir.display());
 
         Ok(level)
     }
