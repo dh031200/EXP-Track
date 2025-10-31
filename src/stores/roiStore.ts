@@ -9,6 +9,7 @@ interface RoiState {
   // Current ROI configurations
   levelRoi: Roi | null;
   expRoi: Roi | null;
+  inventoryRoi: Roi | null;
   // mapLocationRoi: Roi | null; // Commented out temporarily
 
   // Loading states
@@ -29,6 +30,7 @@ export const useRoiStore = create<RoiState>()(
       // Initial state
       levelRoi: null,
       expRoi: null,
+      inventoryRoi: null,
       // mapLocationRoi: null, // Commented out temporarily
       isLoading: false,
       error: null,
@@ -47,6 +49,9 @@ export const useRoiStore = create<RoiState>()(
               break;
             case 'exp':
               set({ expRoi: roi, isLoading: false });
+              break;
+            case 'inventory':
+              set({ inventoryRoi: roi, isLoading: false });
               break;
             // case 'mapLocation': // Commented out temporarily
             //   set({ mapLocationRoi: roi, isLoading: false });
@@ -67,8 +72,12 @@ export const useRoiStore = create<RoiState>()(
             return state.levelRoi;
           case 'exp':
             return state.expRoi;
+          case 'inventory':
+            return state.inventoryRoi;
           // case 'mapLocation': // Commented out temporarily
           //   return state.mapLocationRoi;
+          default:
+            return null;
         }
       },
 
@@ -87,6 +96,9 @@ export const useRoiStore = create<RoiState>()(
             case 'exp':
               set({ expRoi: null, isLoading: false });
               break;
+            case 'inventory':
+              set({ inventoryRoi: null, isLoading: false });
+              break;
             // case 'mapLocation': // Commented out temporarily
             //   set({ mapLocationRoi: null, isLoading: false });
             //   break;
@@ -102,15 +114,17 @@ export const useRoiStore = create<RoiState>()(
       loadAllRois: async () => {
         set({ isLoading: true, error: null });
         try {
-          const [levelRoi, expRoi] = await Promise.all([
+          const [levelRoi, expRoi, inventoryRoi] = await Promise.all([
             loadRoi('level'),
             loadRoi('exp'),
+            loadRoi('inventory'),
             // loadRoi('mapLocation'), // Commented out temporarily
           ]);
 
           set({
             levelRoi,
             expRoi,
+            inventoryRoi,
             // mapLocationRoi, // Commented out temporarily
             isLoading: false,
           });
@@ -130,6 +144,7 @@ export const useRoiStore = create<RoiState>()(
       partialize: (state) => ({
         levelRoi: state.levelRoi,
         expRoi: state.expRoi,
+        inventoryRoi: state.inventoryRoi,
         // mapLocationRoi: state.mapLocationRoi, // Commented out temporarily
       }),
     }
