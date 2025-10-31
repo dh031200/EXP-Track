@@ -1,4 +1,4 @@
-use image::{DynamicImage, GrayImage, ImageBuffer, Luma, imageops};
+use image::{DynamicImage, GrayImage, ImageBuffer, Luma, Rgb, RgbImage, imageops};
 use std::path::Path;
 use std::collections::HashMap;
 use rayon::prelude::*;
@@ -366,7 +366,7 @@ impl InventoryTemplateMatcher {
         let gray = inventory_image.to_luma8();
 
         // Detect digits in ROI
-        let detections = self.detect_digits_in_roi(&gray, roi)?;
+        let detections = self.detect_digits_in_roi(&gray, roi, slot)?;
 
         if detections.is_empty() {
             return Ok(0); // Empty slot
@@ -409,9 +409,9 @@ impl InventoryTemplateMatcher {
         Ok(results)
     }
 
-    /// Detect all digits in ROI using single-scale template matching
-    /// Each digit is matched at 1.0x scale with 20 different templates
-    fn detect_digits_in_roi(&self, gray: &GrayImage, roi: &SlotRoi) -> Result<Vec<DigitDetection>, String> {
+    /// Detect all digits in ROI using multi-scale template matching
+    /// Each digit is matched at multiple scales (0.6x-1.3x), keeping highest similarity per position
+    fn detect_digits_in_roi(&self, gray: &GrayImage, roi: &SlotRoi, slot_name: &str) -> Result<Vec<DigitDetection>, String> {
         // Extract ROI
         let roi_image = image::imageops::crop_imm(
             gray,
@@ -421,27 +421,8 @@ impl InventoryTemplateMatcher {
             roi.height,
         ).to_image();
 
-        // Tight crop: find bounding box of white pixels (digits)
-        let tight_bbox = self.find_content_bbox(&roi_image);
-
-        #[cfg(debug_assertions)]
-        if let Some((crop_x, crop_y, crop_w, crop_h)) = tight_bbox {
-            println!("      📐 Tight crop: ({}, {}) {}×{} -> ({}, {}) {}×{}",
-                0, 0, roi.width, roi.height,
-                crop_x, crop_y, crop_w, crop_h
-            );
-        }
-
-        // Use tight cropped region if found, otherwise use original
-        let (roi_image, offset_x, offset_y) = if let Some((crop_x, crop_y, crop_w, crop_h)) = tight_bbox {
-            let cropped = image::imageops::crop_imm(&roi_image, crop_x, crop_y, crop_w, crop_h).to_image();
-            (cropped, crop_x, crop_y)
-        } else {
-            (roi_image, 0, 0)
-        };
-
-        // Single scale matching (1.0x only)
-        let scales = vec![1.0];
+        // Multi-scale matching (0.6x - 1.3x, 8 scales)
+        let scales = vec![0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3];
         let threshold = 0.7;
 
         use rayon::prelude::*;
@@ -451,8 +432,8 @@ impl InventoryTemplateMatcher {
             .flat_map(|t| scales.iter().map(move |&s| (t, s)))
             .collect();
 
-        // Parallel matching: each template tested independently at 1.0x scale
-        // NMS will select highest similarity per position across all templates
+        // Parallel matching: each (digit, scale) combination tested independently
+        // NMS will select highest similarity per position across all scales
         let all_detections: Vec<DigitDetection> = combinations.par_iter()
             .flat_map(|(template, scale)| {
                 // Resize template to current scale
@@ -485,6 +466,9 @@ impl InventoryTemplateMatcher {
                             matches.len(),
                             max_score
                         );
+
+                        // Save debug image for this template
+                        self.save_debug_image(&roi_image, &template.name, &scaled_template, &matches, slot_name);
                     } else {
                         println!("      ❌ digit={}, scale={:.1}x, template={}: no matches (threshold={})",
                             template.digit,
@@ -495,12 +479,12 @@ impl InventoryTemplateMatcher {
                     }
                 }
 
-                // Convert to DigitDetection with scale info (apply offset for tight crop)
+                // Convert to DigitDetection with scale info
                 matches.into_iter().map(|(x, y, score)| {
                     DigitDetection {
                         digit: template.digit,
-                        x: x + offset_x + roi.x,  // Apply tight crop offset
-                        y: y + offset_y + roi.y,  // Apply tight crop offset
+                        x: x + roi.x,
+                        y: y + roi.y,
                         width: scaled_width,
                         height: scaled_height,
                         score,
@@ -545,44 +529,6 @@ impl InventoryTemplateMatcher {
         matches
     }
 
-    /// Find tight bounding box of white pixels (content) in image
-    /// Returns (x, y, width, height) or None if no white pixels found
-    fn find_content_bbox(&self, image: &GrayImage) -> Option<(u32, u32, u32, u32)> {
-        let (width, height) = image.dimensions();
-
-        let mut min_x = width;
-        let mut max_x = 0;
-        let mut min_y = height;
-        let mut max_y = 0;
-        let mut found_white = false;
-
-        // Find bounding box of white pixels (value > 128)
-        for y in 0..height {
-            for x in 0..width {
-                if image.get_pixel(x, y)[0] > 128 {
-                    found_white = true;
-                    min_x = min_x.min(x);
-                    max_x = max_x.max(x);
-                    min_y = min_y.min(y);
-                    max_y = max_y.max(y);
-                }
-            }
-        }
-
-        if !found_white {
-            return None;
-        }
-
-        // Add small padding (2 pixels on each side)
-        let padding = 2;
-        let crop_x = min_x.saturating_sub(padding);
-        let crop_y = min_y.saturating_sub(padding);
-        let crop_w = ((max_x + padding + 1).min(width) - crop_x).max(1);
-        let crop_h = ((max_y + padding + 1).min(height) - crop_y).max(1);
-
-        Some((crop_x, crop_y, crop_w, crop_h))
-    }
-
     /// Calculate binary image similarity using exact pixel matching
     /// Optimized for binary images (0 or 255) - counts exact matches
     fn calculate_ncc(&self, image: &GrayImage, template: &GrayImage, x: u32, y: u32) -> f32 {
@@ -605,6 +551,82 @@ impl InventoryTemplateMatcher {
 
         // Return match ratio (0.0 ~ 1.0)
         matched_pixels as f32 / total_pixels as f32
+    }
+
+    /// Draw rectangle on RGB image
+    fn draw_rect(image: &mut RgbImage, x: u32, y: u32, width: u32, height: u32, color: Rgb<u8>, thickness: u32) {
+        let (img_width, img_height) = image.dimensions();
+
+        // Draw top and bottom edges
+        for i in 0..thickness {
+            for dx in 0..width {
+                let px = x + dx;
+                if y + i < img_height && px < img_width {
+                    image.put_pixel(px, y + i, color);
+                }
+                if y + height > i && y + height - 1 - i < img_height && px < img_width {
+                    image.put_pixel(px, y + height - 1 - i, color);
+                }
+            }
+        }
+
+        // Draw left and right edges
+        for i in 0..thickness {
+            for dy in 0..height {
+                let py = y + dy;
+                if x + i < img_width && py < img_height {
+                    image.put_pixel(x + i, py, color);
+                }
+                if x + width > i && x + width - 1 - i < img_width && py < img_height {
+                    image.put_pixel(x + width - 1 - i, py, color);
+                }
+            }
+        }
+    }
+
+    /// Save debug image with sliding window visualization
+    fn save_debug_image(
+        &self,
+        roi_image: &GrayImage,
+        template_name: &str,
+        template: &GrayImage,
+        matches: &[(u32, u32, f32)],
+        slot_name: &str,
+    ) {
+        let (width, height) = roi_image.dimensions();
+        let (tmpl_width, tmpl_height) = template.dimensions();
+
+        // Convert grayscale to RGB
+        let mut rgb_image = RgbImage::from_fn(width, height, |x, y| {
+            let gray_val = roi_image.get_pixel(x, y)[0];
+            Rgb([gray_val, gray_val, gray_val])
+        });
+
+        // Draw sliding window area (blue)
+        let blue = Rgb([0u8, 0u8, 255u8]);
+        Self::draw_rect(&mut rgb_image, 0, 0, width, height, blue, 2);
+
+        // Draw all matches (green) with similarity
+        let green = Rgb([0u8, 255u8, 0u8]);
+        for (x, y, _score) in matches {
+            Self::draw_rect(&mut rgb_image, *x, *y, tmpl_width, tmpl_height, green, 1);
+        }
+
+        // Save to debug directory
+        let debug_dir = std::path::Path::new("/tmp/inventory_debug");
+        std::fs::create_dir_all(debug_dir).ok();
+
+        let filename = format!("{}/{}_{}_matches_{}.png",
+            debug_dir.display(),
+            slot_name,
+            template_name,
+            matches.len()
+        );
+
+        rgb_image.save(&filename).ok();
+
+        #[cfg(debug_assertions)]
+        println!("      💾 Debug image saved: {}", filename);
     }
 
     /// Non-maximum suppression to remove overlapping detections
