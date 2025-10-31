@@ -180,11 +180,20 @@ impl InventoryTemplateMatcher {
         // Step 5: Crop inventory region from original grayscale
         let cropped_gray = imageops::crop_imm(&gray, *left, *top, inv_width, inv_height).to_image();
 
-        // Step 6: Final threshold for OCR (threshold 1)
+        // Step 6: Resize to standard 522x255 for consistent template matching
+        // NEAREST preserves sharp edges for better digit recognition
+        let resized_gray = image::imageops::resize(
+            &cropped_gray,
+            522,
+            255,
+            image::imageops::FilterType::Nearest,
+        );
+
+        // Step 7: Final threshold for OCR (threshold 1)
         // Dark pixels (< 1) become white (255) - digits
         // Bright pixels (≥ 1) become black (0) - background
-        let final_binary = ImageBuffer::from_fn(inv_width, inv_height, |x, y| {
-            let pixel = cropped_gray.get_pixel(x, y);
+        let final_binary = ImageBuffer::from_fn(522, 255, |x, y| {
+            let pixel = resized_gray.get_pixel(x, y);
             if pixel[0] < 1 {
                 Luma([255u8])  // Dark pixels → white
             } else {
@@ -196,7 +205,7 @@ impl InventoryTemplateMatcher {
     }
 
     /// Detect inventory region from full screenshot
-    /// Returns original-size inventory image (no resize)
+    /// Returns 522x255 standardized inventory image
     pub fn detect_inventory_region(&self, image: &DynamicImage) -> Result<DynamicImage, String> {
         let (inventory_image, _coords) = self.detect_inventory_region_with_coords(image)?;
         Ok(inventory_image)
@@ -374,16 +383,14 @@ impl InventoryTemplateMatcher {
     /// Recognize counts in all 8 inventory slots
     /// Returns HashMap with slot names as keys and item counts as values
     pub fn recognize_all_slots(&self, inventory_image: &DynamicImage) -> Result<HashMap<String, u32>, String> {
-        // Calculate slot ROIs dynamically based on actual inventory size
-        let width = inventory_image.width();
-        let height = inventory_image.height();
-        let slot_rois = Self::calculate_slot_rois(width, height);
+        // Inventory image is always 522x255 after standardization
+        let slot_rois = Self::calculate_slot_rois(522, 255);
 
         let mut results = HashMap::new();
         let slots = vec!["shift", "ins", "home", "pup", "ctrl", "del", "end", "pdn"];
 
         #[cfg(debug_assertions)]
-        println!("    📦 Inventory slots ({}x{}):", width, height);
+        println!("    📦 Inventory slots (522x255):");
 
         for slot in slots {
             // Recognize count in this slot, default to 0 if recognition fails
@@ -398,7 +405,8 @@ impl InventoryTemplateMatcher {
         Ok(results)
     }
 
-    /// Detect all digits in ROI using multi-scale template matching
+    /// Detect all digits in ROI using single-scale template matching
+    /// (No multi-scale needed since inventory is standardized to 522x255)
     fn detect_digits_in_roi(&self, gray: &GrayImage, roi: &SlotRoi) -> Result<Vec<DigitDetection>, String> {
         // Extract ROI
         let roi_image = image::imageops::crop_imm(
@@ -409,54 +417,33 @@ impl InventoryTemplateMatcher {
             roi.height,
         ).to_image();
 
-        // Multi-scale template matching
-        let scales = vec![0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3];
+        // Single scale (1.0x) - inventory is already standardized
         let threshold = 0.7;
 
-        // Use rayon for parallel template matching across scales
+        // Use rayon for parallel template matching across digits
         use rayon::prelude::*;
 
-        // Create all (template, scale) combinations for parallel processing
-        let mut combinations = Vec::new();
-        for template in &self.templates {
-            for &scale in &scales {
-                combinations.push((template, scale));
-            }
-        }
-
-        let all_detections: Vec<DigitDetection> = combinations.par_iter()
-            .flat_map(|(template, scale)| {
-                // Resize template
+        let all_detections: Vec<DigitDetection> = self.templates.par_iter()
+            .flat_map(|template| {
+                // Use template at original size (no scaling needed)
                 let (tmpl_width, tmpl_height) = template.image.dimensions();
-                let new_width = (tmpl_width as f32 * scale) as u32;
-                let new_height = (tmpl_height as f32 * scale) as u32;
 
-                if new_width < 5 || new_height < 5 {
-                    return Vec::new();
-                }
-                if new_width > roi.width || new_height > roi.height {
+                if tmpl_width > roi.width || tmpl_height > roi.height {
                     return Vec::new();
                 }
 
-                let scaled_template = image::imageops::resize(
-                    &template.image,
-                    new_width,
-                    new_height,
-                    image::imageops::FilterType::Lanczos3,  // High quality for accurate recognition
-                );
-
-                // Template matching
-                let matches = self.match_template(&roi_image, &scaled_template, threshold);
+                // Template matching at 1.0x scale
+                let matches = self.match_template(&roi_image, &template.image, threshold);
 
                 matches.into_iter().map(|(x, y, score)| {
                     DigitDetection {
                         digit: template.digit,
                         x: x + roi.x,
                         y: y + roi.y,
-                        width: new_width,
-                        height: new_height,
+                        width: tmpl_width,
+                        height: tmpl_height,
                         score,
-                        scale: *scale,
+                        scale: 1.0,
                     }
                 }).collect()
             })
