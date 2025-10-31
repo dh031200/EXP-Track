@@ -409,8 +409,8 @@ impl InventoryTemplateMatcher {
         Ok(results)
     }
 
-    /// Detect all digits in ROI using multi-scale template matching
-    /// Each digit is matched at multiple scales (0.6x-1.3x), keeping highest similarity per position
+    /// Detect all digits in ROI using single-scale template matching
+    /// Each digit is matched at 1.0x scale with 20 different templates
     fn detect_digits_in_roi(&self, gray: &GrayImage, roi: &SlotRoi) -> Result<Vec<DigitDetection>, String> {
         // Extract ROI
         let roi_image = image::imageops::crop_imm(
@@ -421,8 +421,8 @@ impl InventoryTemplateMatcher {
             roi.height,
         ).to_image();
 
-        // Multi-scale matching (0.6x - 1.3x, 8 scales)
-        let scales = vec![0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3];
+        // Single scale matching (1.0x only)
+        let scales = vec![1.0];
         let threshold = 0.7;
 
         use rayon::prelude::*;
@@ -432,8 +432,8 @@ impl InventoryTemplateMatcher {
             .flat_map(|t| scales.iter().map(move |&s| (t, s)))
             .collect();
 
-        // Parallel matching: each (digit, scale) combination tested independently
-        // NMS will select highest similarity per position across all scales
+        // Parallel matching: each template tested independently at 1.0x scale
+        // NMS will select highest similarity per position across all templates
         let all_detections: Vec<DigitDetection> = combinations.par_iter()
             .flat_map(|(template, scale)| {
                 // Resize template to current scale
