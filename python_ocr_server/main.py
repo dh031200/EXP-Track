@@ -304,4 +304,12 @@ async def shutdown():
 
 if __name__ == "__main__":
     import uvicorn
+    import platform
+
+    # Fix Windows ProactorEventLoop connection reset errors
+    if platform.system() == "Windows":
+        # Use SelectorEventLoop instead of ProactorEventLoop on Windows
+        # This prevents ConnectionResetError when clients close connections quickly
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
     uvicorn.run(app, host="127.0.0.1", port=39835, log_level="info")
