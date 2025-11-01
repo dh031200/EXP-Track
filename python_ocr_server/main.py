@@ -302,6 +302,7 @@ async def shutdown():
 if __name__ == "__main__":
     import uvicorn
     import platform
+    import logging
 
     # Fix Windows ProactorEventLoop connection reset errors
     if platform.system() == "Windows":
@@ -309,4 +310,35 @@ if __name__ == "__main__":
         # This prevents ConnectionResetError when clients close connections quickly
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-    uvicorn.run(app, host="127.0.0.1", port=39835, log_level="info")
+    # Fix for PyInstaller builds with console=False
+    # When bundled without console, sys.stdout/stderr are None, which breaks uvicorn logging
+    if getattr(sys, 'frozen', False) and sys.stdout is None:
+        # Create log directory if it doesn't exist
+        log_dir = Path(sys._MEIPASS).parent / "logs"
+        log_dir.mkdir(exist_ok=True)
+        log_file = log_dir / "ocr_server.log"
+
+        # Redirect stdout/stderr to log file
+        sys.stdout = open(log_file, 'w', encoding='utf-8', buffering=1)
+        sys.stderr = sys.stdout
+
+        # Configure logging to use file handler
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler(log_file, mode='w', encoding='utf-8')
+            ]
+        )
+
+        # Disable uvicorn's default logging and use custom config
+        uvicorn.run(
+            app,
+            host="127.0.0.1",
+            port=39835,
+            log_config=None,  # Disable default logging config
+            access_log=False   # Disable access logs for cleaner output
+        )
+    else:
+        # Normal execution with console
+        uvicorn.run(app, host="127.0.0.1", port=39835, log_level="info")
