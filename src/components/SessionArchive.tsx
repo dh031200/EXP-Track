@@ -31,7 +31,7 @@ export function SessionArchive({ currentSession }: SessionArchiveProps) {
   const [sessionName, setSessionName] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
-  const [showCurrentSession, setShowCurrentSession] = useState(true);
+  const [showCurrentSession, setShowCurrentSession] = useState(!!currentSession);
 
   useEffect(() => {
     loadSessions();
@@ -47,14 +47,7 @@ export function SessionArchive({ currentSession }: SessionArchiveProps) {
   };
 
   const handleSaveSession = async () => {
-    const sessionData = currentSession || {
-      elapsed_seconds: 5425,
-      total_exp: 87653000,
-      level: 235,
-      exp_per_second: 16157.9,
-      hp_potions_used: 142,
-      mp_potions_used: 89,
-    };
+    if (!currentSession) return;
 
     const now = Date.now();
     const date = new Date(now);
@@ -64,12 +57,12 @@ export function SessionArchive({ currentSession }: SessionArchiveProps) {
       id: now.toString(),
       title: sessionName.trim() || defaultTitle,
       timestamp: now,
-      combat_time: sessionData.elapsed_seconds,
-      exp_gained: sessionData.total_exp,
-      current_level: sessionData.level,
-      avg_exp_per_second: sessionData.exp_per_second,
-      hp_potions_used: sessionData.hp_potions_used,
-      mp_potions_used: sessionData.mp_potions_used,
+      combat_time: currentSession.elapsed_seconds,
+      exp_gained: currentSession.total_exp,
+      current_level: currentSession.level,
+      avg_exp_per_second: currentSession.exp_per_second,
+      hp_potions_used: currentSession.hp_potions_used,
+      mp_potions_used: currentSession.mp_potions_used,
     };
 
     try {
@@ -129,47 +122,37 @@ export function SessionArchive({ currentSession }: SessionArchiveProps) {
     return `${date.getMonth() + 1}/${date.getDate()} ${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`;
   };
 
-  // Dummy current session for testing
-  const displaySession = currentSession || {
-    elapsed_seconds: 5425, // 1시간 30분 25초
-    total_exp: 87653000, // 8765만 3000
-    level: 235,
-    exp_per_second: 16157.9,
-    hp_potions_used: 142,
-    mp_potions_used: 89,
-  };
-
   return (
     <div className="session-archive">
 
       {/* Current Session Save Section */}
-      {showCurrentSession && (
+      {showCurrentSession && currentSession && (
         <div className="current-session-card">
           <h3>현재 세션</h3>
           <div className="session-stats-grid">
             <div className="stat-item">
               <span className="stat-label">전투 시간</span>
-              <span className="stat-value">{formatTime(displaySession.elapsed_seconds)}</span>
+              <span className="stat-value">{formatTime(currentSession.elapsed_seconds)}</span>
             </div>
             <div className="stat-item">
               <span className="stat-label">획득 경험치</span>
-              <span className="stat-value">{formatKoreanNumber(displaySession.total_exp)}</span>
+              <span className="stat-value">{formatKoreanNumber(currentSession.total_exp)}</span>
             </div>
             <div className="stat-item">
               <span className="stat-label">현재 레벨</span>
-              <span className="stat-value">Lv.{displaySession.level}</span>
+              <span className="stat-value">Lv.{currentSession.level}</span>
             </div>
             <div className="stat-item">
               <span className="stat-label">평균 (1초당)</span>
-              <span className="stat-value">{formatKoreanNumber(Math.floor(displaySession.exp_per_second))}</span>
+              <span className="stat-value">{formatKoreanNumber(Math.floor(currentSession.exp_per_second))}</span>
             </div>
             <div className="stat-item">
               <span className="stat-label">HP 포션</span>
-              <span className="stat-value">{displaySession.hp_potions_used}개</span>
+              <span className="stat-value">{currentSession.hp_potions_used}개</span>
             </div>
             <div className="stat-item">
               <span className="stat-label">MP 포션</span>
-              <span className="stat-value">{displaySession.mp_potions_used}개</span>
+              <span className="stat-value">{currentSession.mp_potions_used}개</span>
             </div>
           </div>
           <div className="save-session-form">
@@ -183,7 +166,7 @@ export function SessionArchive({ currentSession }: SessionArchiveProps) {
             <button 
               className="save-session-btn" 
               onClick={handleSaveSession}
-              disabled={displaySession.elapsed_seconds === 0}
+              disabled={currentSession.elapsed_seconds === 0}
             >
               현재 전투 기록 저장
             </button>
