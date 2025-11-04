@@ -5,6 +5,7 @@ import { listen } from '@tauri-apps/api/event';
 import { CompactRoiManager } from "./components/CompactRoiManager";
 import { Settings } from "./components/Settings";
 import { TimerSettingsModal } from "./components/TimerSettingsModal";
+import { PotionSettings } from "./components/PotionSettings";
 import { useSettingsStore } from "./stores/settingsStore";
 import { useRoiStore } from "./stores/roiStore";
 import { useTrackingStore } from "./stores/trackingStore";
@@ -36,6 +37,7 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showTimerSettings, setShowTimerSettings] = useState(false);
   const [showMesoModal, setShowMesoModal] = useState(false);
+  const [showPotionModal, setShowPotionModal] = useState(false);
   const [showSessionArchive, setShowSessionArchive] = useState(false);
   const [mesoInputStart, setMesoInputStart] = useState('');
   const [mesoInputEnd, setMesoInputEnd] = useState('');
@@ -229,7 +231,7 @@ function App() {
   useEffect(() => {
     const unlisten = listen('global-shortcut-toggle-timer', () => {
       // Don't trigger if user is in settings or selecting ROI
-      if (showSettings || isSelecting || showRoiModal) {
+      if (showSettings || isSelecting || showRoiModal || showPotionModal) {
         return;
       }
 
@@ -247,7 +249,7 @@ function App() {
       unlisten.then(fn => fn());
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasAnyRoi, ocrHealthy, showSettings, isSelecting, showRoiModal, trackingState]);
+  }, [hasAnyRoi, ocrHealthy, showSettings, isSelecting, showRoiModal, showPotionModal, trackingState]);
 
   // Record EXP data points every minute for per-interval calculation
   useEffect(() => {
@@ -512,6 +514,22 @@ function App() {
     await window.setSize(new LogicalSize(540, 130));
   };
 
+  const handleOpenPotionModal = async () => {
+    setShowPotionModal(true);
+    
+    const window = getCurrentWindow();
+    await window.setResizable(false);
+    await window.setSize(new LogicalSize(540, 510));
+  };
+
+  const handleClosePotionModal = async () => {
+    setShowPotionModal(false);
+    
+    const window = getCurrentWindow();
+    await window.setResizable(true);
+    await window.setSize(new LogicalSize(540, 130));
+  };
+
   const handleOpenSessionArchive = async () => {
     setShowSessionArchive(true);
     
@@ -712,13 +730,13 @@ function App() {
           display: 'flex',
           flexDirection: 'column',
           position: 'relative',
-          cursor: (!isSelecting && !showSettings && !showMesoModal && !showRoiModal && !showSessionArchive) ? 'move' : 'default',
+          cursor: (!isSelecting && !showSettings && !showMesoModal && !showPotionModal && !showRoiModal && !showSessionArchive) ? 'move' : 'default',
           pointerEvents: isSelecting ? 'none' : 'auto',
         }}
-        onMouseDown={!isSelecting && !showSettings && !showMesoModal && !showRoiModal && !showSessionArchive ? handleDragStart : undefined}
+        onMouseDown={!isSelecting && !showSettings && !showMesoModal && !showPotionModal && !showRoiModal && !showSessionArchive ? handleDragStart : undefined}
       >
         {/* OCR Status - Left side of title bar */}
-        {!isSelecting && !showSettings && !showMesoModal && !showRoiModal && !showSessionArchive && (
+        {!isSelecting && !showSettings && !showMesoModal && !showPotionModal && !showRoiModal && !showSessionArchive && (
           <div
             onMouseDown={(e) => e.stopPropagation()}
             style={{
@@ -746,7 +764,7 @@ function App() {
         )}
 
         {/* Window Controls are now positioned relative to this container */}
-        {!isSelecting && !showSettings && !showMesoModal && !showRoiModal && !showSessionArchive && (
+        {!isSelecting && !showSettings && !showMesoModal && !showPotionModal && !showRoiModal && !showSessionArchive && (
           <div
             onMouseDown={(e) => e.stopPropagation()}
             style={{
@@ -824,15 +842,15 @@ function App() {
             style={{
               flex: 1,
               display: 'flex',
-              flexDirection: (showSettings || showMesoModal || showRoiModal || showSessionArchive) ? 'column' : 'row',
-              alignItems: (showSettings || showMesoModal || showRoiModal || showSessionArchive) ? 'stretch' : 'center',
-              padding: isSelecting ? '0' : (showSettings || showMesoModal || showRoiModal || showSessionArchive) ? '0' : '0 12px 8px 12px',
+              flexDirection: (showSettings || showMesoModal || showPotionModal || showRoiModal || showSessionArchive) ? 'column' : 'row',
+              alignItems: (showSettings || showMesoModal || showPotionModal || showRoiModal || showSessionArchive) ? 'stretch' : 'center',
+              padding: isSelecting ? '0' : (showSettings || showMesoModal || showPotionModal || showRoiModal || showSessionArchive) ? '0' : '0 12px 8px 12px',
               gap: '4px',
-              userSelect: (showSettings || showMesoModal || showRoiModal || showSessionArchive) ? 'auto' : 'none',
-              overflow: (showSettings || showMesoModal || showRoiModal || showSessionArchive) ? 'auto' : 'hidden',
+              userSelect: (showSettings || showMesoModal || showPotionModal || showRoiModal || showSessionArchive) ? 'auto' : 'none',
+              overflow: (showSettings || showMesoModal || showPotionModal || showRoiModal || showSessionArchive) ? 'auto' : 'hidden',
             }}
           >
-            {!isSelecting && !showSettings && !showMesoModal && !showRoiModal && !showSessionArchive && (
+            {!isSelecting && !showSettings && !showMesoModal && !showPotionModal && !showRoiModal && !showSessionArchive && (
               <>
                 {/* Section 1: 세션 시간 */}
                 <div 
@@ -944,6 +962,26 @@ function App() {
                       title="설정"
                   >
                       <img src={settingIcon} alt="Settings" style={{ width: '14px', height: '14px' }} />
+                  </button>
+                  <button
+                    onClick={handleOpenMesoModal}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    style={{
+                      width: '24px',
+                      height: '24px',
+                      background: 'rgba(255, 193, 7, 0.1)',
+                      border: '1px solid rgba(255, 193, 7, 0.3)',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                      padding: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                    title="메소 관리"
+                  >
+                    <img src={mesoIcon} alt="Meso" style={{ width: '14px', height: '14px' }} />
                   </button>
                   </div>
 
@@ -1123,7 +1161,7 @@ function App() {
                       포션 사용
                     </span>
                     <button
-                      onClick={handleOpenMesoModal}
+                      onClick={handleOpenPotionModal}
                       onMouseDown={(e) => e.stopPropagation()}
                       style={{
                         width: '24px',
@@ -1136,7 +1174,8 @@ function App() {
                         padding: 0,
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'center'
+                        justifyContent: 'center',
+                        fontSize: '14px'
                       }}
                       onMouseEnter={(e) => {
                         e.currentTarget.style.transform = 'scale(1.2)';
@@ -1144,9 +1183,9 @@ function App() {
                       onMouseLeave={(e) => {
                         e.currentTarget.style.transform = 'scale(1)';
                       }}
-                      title="메소 관리"
+                      title="포션 슬롯 설정"
                     >
-                      <img src={mesoIcon} alt="Meso" style={{ width: '16px', height: '16px' }} />
+                      🧪
                     </button>
                   </div>
                   <div style={{
@@ -1177,6 +1216,73 @@ function App() {
                       {parallelOcrTracker.stats?.mp_potions_used || 0}
                     </div>
                   </div>
+                </div>
+              </>
+            )}
+
+            {showPotionModal && (
+              <>
+                {/* Draggable Title Bar for Potion Settings */}
+                <div
+                  onMouseDown={handleDragStart}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    height: '40px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'move',
+                    zIndex: 999,
+                    userSelect: 'none'
+                  }}
+                >
+                  <span style={{
+                    fontSize: '12px',
+                    fontWeight: '600',
+                    color: '#999'
+                  }}>
+                    포션 슬롯 설정
+                  </span>
+                </div>
+
+                {/* Back Button */}
+                <button
+                  onClick={handleClosePotionModal}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  style={{
+                    position: 'absolute',
+                    top: '8px',
+                    left: '8px',
+                    padding: '6px 12px',
+                    fontSize: '13px',
+                    background: 'rgba(255, 255, 255, 0.95)',
+                    color: '#333',
+                    border: '1px solid rgba(0, 0, 0, 0.2)',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    fontWeight: '600',
+                    zIndex: 1000,
+                    boxShadow: '0 2px 6px rgba(0, 0, 0, 0.1)'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(240, 240, 240, 1)';
+                    e.currentTarget.style.transform = 'scale(1.05)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.95)';
+                    e.currentTarget.style.transform = 'scale(1)';
+                  }}
+                >
+                  ← 뒤로
+                </button>
+
+                {/* Potion Settings Content with Top Padding */}
+                <div style={{ paddingTop: '40px', width: '100%', height: '100%' }}>
+                  <PotionSettings />
                 </div>
               </>
             )}
