@@ -329,15 +329,17 @@ pub async fn auto_detect_rois(
     ocr_state: State<'_, OcrServiceState>,
     screen_state: State<'_, crate::commands::screen_capture::ScreenCaptureState>,
 ) -> Result<AutoDetectResult, String> {
-    // Step 1: Capture full screen
-    let image_bytes = {
+    // Step 1: Capture full screen and get scale factor
+    let (image_bytes, scale_factor) = {
         let state_guard = screen_state.inner().lock()
             .map_err(|e| format!("Failed to lock screen state: {}", e))?;
         let capture = state_guard.as_ref()
             .ok_or("Screen capture not initialized")?;
 
         let image = capture.capture_full()?;
-        crate::services::screen_capture::ScreenCapture::image_to_png_bytes(&image)?
+        let bytes = crate::services::screen_capture::ScreenCapture::image_to_png_bytes(&image)?;
+        let scale = capture.get_scale_factor();
+        (bytes, scale)
     };
 
     // Convert bytes to DynamicImage
@@ -354,24 +356,31 @@ pub async fn auto_detect_rois(
     {
         let service = ocr_state.inner().lock();
         if let Ok((left, top, right, bottom, matched_boxes)) = service.http_client.detect_level_roi_with_boxes(&image) {
+            // Template matching works on physical pixels from xcap
+            // Convert to logical pixels for consistent storage
+            let logical_left = (left as f64 / scale_factor) as i32;
+            let logical_top = (top as f64 / scale_factor) as i32;
+            let logical_width = ((right - left + 1) as f64 / scale_factor) as u32;
+            let logical_height = ((bottom - top + 1) as f64 / scale_factor) as u32;
+            
             result.level = Some(crate::models::roi::Roi::new(
-                left as i32,
-                top as i32,
-                right - left + 1,
-                bottom - top + 1,
+                logical_left,
+                logical_top,
+                logical_width,
+                logical_height,
             ));
 
-            // Convert matched boxes to serializable format
+            // Convert matched boxes to logical coordinates
             result.level_boxes = Some(
                 matched_boxes.iter().map(|b| LevelBoxCoords {
-                    x: b.x,
-                    y: b.y,
-                    width: b.width,
-                    height: b.height,
+                    x: (b.x as f64 / scale_factor) as u32,
+                    y: (b.y as f64 / scale_factor) as u32,
+                    width: (b.width as f64 / scale_factor) as u32,
+                    height: (b.height as f64 / scale_factor) as u32,
                 }).collect()
             );
 
-            println!("✅ Level ROI detected with {} digit boxes", matched_boxes.len());
+            println!("✅ Level ROI detected with {} digit boxes (physical -> logical, scale={})", matched_boxes.len(), scale_factor);
         }
     }
 
@@ -381,12 +390,21 @@ pub async fn auto_detect_rois(
         if let Some(matcher) = &service.inventory_matcher {
             if let Ok((_, coords)) = matcher.detect_inventory_region_with_coords(&image) {
                 let (left, top, right, bottom) = coords;
+                
+                // Convert physical pixels to logical pixels
+                let logical_left = (left as f64 / scale_factor) as i32;
+                let logical_top = (top as f64 / scale_factor) as i32;
+                let logical_width = ((right - left + 1) as f64 / scale_factor) as u32;
+                let logical_height = ((bottom - top + 1) as f64 / scale_factor) as u32;
+                
                 result.inventory = Some(crate::models::roi::Roi::new(
-                    left as i32,
-                    top as i32,
-                    right - left + 1,
-                    bottom - top + 1,
+                    logical_left,
+                    logical_top,
+                    logical_width,
+                    logical_height,
                 ));
+                
+                println!("✅ Inventory ROI detected (physical -> logical, scale={})", scale_factor);
             }
         }
     }
