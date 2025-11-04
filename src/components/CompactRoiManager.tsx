@@ -32,10 +32,15 @@ interface CompactRoiManagerProps {
   onSelectingChange?: (isSelecting: boolean) => void;
 }
 
+// Import example images
+import levelExample from '/icons/level_roi_example.png';
+import expExample from '/icons/exp_roi_example.png';
+import potionExample from '/icons/potion_roi_example.png';
+
 const ROI_CONFIGS = [
-  { type: 'level' as RoiType, label: '레벨', icon: lvIcon, color: '#4CAF50', autoDetect: true },
-  { type: 'exp' as RoiType, label: '경험치', icon: expIcon, color: '#2196F3', autoDetect: false },
-  { type: 'inventory' as RoiType, label: '포션', icon: [hpIcon, mpIcon], color: '#FF5722', autoDetect: true },
+  { type: 'level' as RoiType, label: '레벨', icon: lvIcon, color: '#4CAF50', autoDetect: true, example: levelExample },
+  { type: 'exp' as RoiType, label: '경험치', icon: expIcon, color: '#2196F3', autoDetect: false, example: expExample },
+  { type: 'inventory' as RoiType, label: '포션', icon: [hpIcon, mpIcon], color: '#FF5722', autoDetect: true, example: potionExample },
   // { type: 'mapLocation' as RoiType, label: 'Map', icon: '🗺️', color: '#9C27B0' }, // Commented out temporarily
   // { type: 'meso' as RoiType, label: 'Meso', icon: '💰', color: '#FF9800' }, // Commented out temporarily
 ];
@@ -46,6 +51,7 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
   const [isInitialized, setIsInitialized] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [previewRoiType, setPreviewRoiType] = useState<RoiType | null>(null);
+  const [showExampleImage, setShowExampleImage] = useState(false);
   const windowStateRef = useRef<WindowState | null>(null);
 
   const { levelRoi, expRoi, inventoryRoi, setRoi, removeRoi, loadAllRois, getLevelBoxes } = useRoiStore();
@@ -69,8 +75,20 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
     }
   };
 
+  const handleManualSelect = (type: RoiType) => {
+    const config = ROI_CONFIGS.find(c => c.type === type);
+    if (!config) return;
+
+    // Show example image for manual selection
+    setCurrentRoiType(type);
+    setPreviewImage(config.example);
+    setPreviewRoiType(type);
+    setShowExampleImage(true);
+  };
+
   const handleSelectClick = async (type: RoiType) => {
     setCurrentRoiType(type);
+    setShowExampleImage(false);
     await setAlwaysOnTop(true);
     windowStateRef.current = await maximizeWindowForROI();
     setIsSelecting(true);
@@ -101,7 +119,7 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
     // Step 4: Wait 500ms for UI to settle
     await new Promise((resolve) => setTimeout(resolve, 500));
 
-    // Step 5: Capture the clean screen
+    // Step 5: Capture the clean screen and show preview
     try {
       const bytes = await captureRegion(roi);
       const dataUrl = bytesToDataUrl(bytes);
@@ -111,6 +129,11 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
         roiType: roiType,
         imageData: dataUrl.split(',')[1], // Remove data:image/png;base64, prefix
       });
+
+      // Update preview with captured image
+      setPreviewImage(dataUrl);
+      setPreviewRoiType(roiType);
+      setShowExampleImage(false);
     } catch (err) {
       console.error('Failed to save preview:', err);
     }
@@ -179,6 +202,8 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
   const handleClosePreview = () => {
     setPreviewImage(null);
     setPreviewRoiType(null);
+    setShowExampleImage(false);
+    setCurrentRoiType(null);
   };
 
   const handleRemoveRoi = async (type: RoiType) => {
@@ -206,17 +231,37 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
               {ROI_CONFIGS.map(({ type, label, icon, color, autoDetect }) => {
                 const roi = getRoi(type);
                 const isConfigured = roi !== null;
-                // For auto-detect buttons, disable if ROI is not configured or invalid
-                const isAutoDetectDisabled = autoDetect && (!isConfigured || !roi || roi.width <= 0 || roi.height <= 0);
+                const isRoiValid = isConfigured && roi && roi.width > 0 && roi.height > 0;
+
+                // Determine button behavior
+                const handleButtonClick = () => {
+                  if (isRoiValid) {
+                    // Valid ROI exists (auto or manual): show preview
+                    handleViewPreview(type);
+                  } else {
+                    // No valid ROI: show example and manual select
+                    handleManualSelect(type);
+                  }
+                };
+
+                const getButtonTitle = () => {
+                  if (isRoiValid) {
+                    return `${label} 미리보기`;
+                  }
+                  if (autoDetect) {
+                    return `${label} ROI 미감지 - 수동 선택`;
+                  }
+                  return `${label} 영역 선택 (예시 보기)`;
+                };
 
                 return (
                   <div key={type} className="roi-button-group">
                     <button
-                      onClick={() => autoDetect ? handleViewPreview(type) : handleSelectClick(type)}
-                      disabled={!isInitialized || isAutoDetectDisabled}
+                      onClick={handleButtonClick}
+                      disabled={!isInitialized}
                       className="roi-select-btn"
                       style={{ borderColor: color }}
-                      title={autoDetect ? (isAutoDetectDisabled ? `${label} ROI 영역 미감지` : `${label} 자동 탐지 결과 보기`) : `${label} 영역 ${isConfigured ? '재' : ''}선택`}
+                      title={getButtonTitle()}
                     >
                       {Array.isArray(icon) ? (
                         <div className="roi-icon-stack">
@@ -229,27 +274,16 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
                         <img src={icon as string} alt={label} className="roi-icon-img" />
                       )}
                       <span className="roi-label">{label}</span>
-                      {autoDetect ? <span className="roi-auto-badge">자동</span> : isConfigured && <span className="roi-check">✓</span>}
+                      {autoDetect ? (
+                        isRoiValid ? (
+                          <span className="roi-auto-badge">자동</span>
+                        ) : (
+                          <span className="roi-auto-badge-warning">미감지</span>
+                        )
+                      ) : (
+                        isConfigured && <span className="roi-check">✓</span>
+                      )}
                     </button>
-
-                    {isConfigured && !autoDetect && (
-                      <div className="roi-actions-compact">
-                        <button
-                          onClick={() => handleViewPreview(type)}
-                          className="roi-action-btn view"
-                          title="미리보기"
-                        >
-                          👁️
-                        </button>
-                        <button
-                          onClick={() => handleRemoveRoi(type)}
-                          className="roi-action-btn delete"
-                          title="삭제"
-                        >
-                          🗑️
-                        </button>
-                      </div>
-                    )}
                   </div>
                 );
               })}
@@ -268,7 +302,7 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
             <div className={`roi-preview-container ${previewImage ? 'slide-in' : ''}`}>
               <div className="roi-preview-header">
                 <span className="roi-preview-title">
-                  👁️ {getLabelForType(previewRoiType!)}
+                  {showExampleImage ? '예시' : '미리보기'} - {getLabelForType(previewRoiType!)}
                 </span>
                 <button
                   onClick={handleClosePreview}
@@ -284,6 +318,34 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
                   className="roi-preview-image"
                 />
               </div>
+              {showExampleImage && (
+                <div className="roi-example-actions">
+                  <div className="roi-example-description">
+                    <div className="roi-example-title">📌 캡처 방법</div>
+                    <div className="roi-example-text">
+                      {previewRoiType === 'exp' && '경험치 바 전체(숫자 + 바 + 퍼센트)를 포함하도록 드래그하여 선택하세요.'}
+                      {previewRoiType === 'level' && '레벨 숫자 부분을 드래그하여 선택하세요.'}
+                      {previewRoiType === 'inventory' && '퀵슬롯 전체 영역을 드래그하여 선택하세요.'}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleSelectClick(currentRoiType!)}
+                    className="roi-select-manual-btn"
+                  >
+                    영역 선택 시작
+                  </button>
+                </div>
+              )}
+              {!showExampleImage && (
+                <div className="roi-preview-actions">
+                  <button
+                    onClick={() => handleManualSelect(previewRoiType!)}
+                    className="roi-manual-reselect-btn"
+                  >
+                    수동으로 다시 선택
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
