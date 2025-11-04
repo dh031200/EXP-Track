@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional, List
 from concurrent.futures import ThreadPoolExecutor
 import asyncio
+from contextlib import asynccontextmanager
 
 import numpy as np
 from fastapi import FastAPI, HTTPException
@@ -17,17 +18,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
 from pydantic import BaseModel
 from rapidocr import RapidOCR
-
-app = FastAPI(title="EXP Tracker OCR Server", version="1.0.0")
-
-# CORS middleware for Tauri app
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 
 # Determine models directory path (works for both dev and bundled app)
@@ -75,51 +65,58 @@ def _load_engine(idx: int) -> RapidOCR:
     return engine
 
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize OCR engine pool on startup - 4 independent engines for true parallelism"""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for startup and shutdown events"""
     global ocr_engines, executor
-    print("🚀 Initializing RapidOCR engine pool...")
 
+    # Startup
+    print("🚀 Initializing RapidOCR engine pool...")
     NUM_WORKERS = 4
     print(f"⚙️  Loading {NUM_WORKERS} independent OCR engines in parallel...")
-    
+
     # Load all 4 engines in parallel (4x faster!)
-    # Use thread pool to load engines concurrently
     load_pool = ThreadPoolExecutor(max_workers=NUM_WORKERS)
-    
+
     try:
         # Submit all load tasks at once
         futures = [load_pool.submit(_load_engine, i) for i in range(NUM_WORKERS)]
-        
+
         # Wait for all engines to load
         for future in futures:
             engine = future.result()
             ocr_engines.append(engine)
     finally:
         load_pool.shutdown(wait=True)
-    
+
     # Create thread pool with 4 workers for OCR operations
     executor = ThreadPoolExecutor(max_workers=NUM_WORKERS)
-    
+
     total_memory = NUM_WORKERS * 24  # ~24MB per engine
     print(f"✅ OCR engine pool ready: {NUM_WORKERS} engines, ~{total_memory}MB total")
     print(f"🚀 True parallel processing enabled - no GIL contention!")
 
+    yield
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup on shutdown"""
-    global executor, ocr_engines
-    
-    # Shutdown thread pool
+    # Shutdown
     if executor:
         executor.shutdown(wait=True)
         print("🛑 Thread pool shutdown complete")
-    
-    # Clear engine pool
+
     ocr_engines.clear()
     print("🛑 OCR engine pool cleared")
+
+
+app = FastAPI(title="EXP Tracker OCR Server", version="1.0.0", lifespan=lifespan)
+
+# CORS middleware for Tauri app
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # Request/Response models
@@ -304,4 +301,44 @@ async def shutdown():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=39835, log_level="info")
+    import platform
+    import logging
+
+    # Fix Windows ProactorEventLoop connection reset errors
+    if platform.system() == "Windows":
+        # Use SelectorEventLoop instead of ProactorEventLoop on Windows
+        # This prevents ConnectionResetError when clients close connections quickly
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+    # Fix for PyInstaller builds with console=False
+    # When bundled without console, sys.stdout/stderr are None, which breaks uvicorn logging
+    if getattr(sys, 'frozen', False) and sys.stdout is None:
+        # Create log directory if it doesn't exist
+        log_dir = Path(sys._MEIPASS).parent / "logs"
+        log_dir.mkdir(exist_ok=True)
+        log_file = log_dir / "ocr_server.log"
+
+        # Redirect stdout/stderr to log file
+        sys.stdout = open(log_file, 'w', encoding='utf-8', buffering=1)
+        sys.stderr = sys.stdout
+
+        # Configure logging to use file handler
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler(log_file, mode='w', encoding='utf-8')
+            ]
+        )
+
+        # Disable uvicorn's default logging and use custom config
+        uvicorn.run(
+            app,
+            host="127.0.0.1",
+            port=39835,
+            log_config=None,  # Disable default logging config
+            access_log=False   # Disable access logs for cleaner output
+        )
+    else:
+        # Normal execution with console
+        uvicorn.run(app, host="127.0.0.1", port=39835, log_level="info")

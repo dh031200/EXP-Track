@@ -1123,13 +1123,13 @@ function App() {
                       현재: Lv.{parallelOcrTracker.stats?.level || '?'} (
                       {startPercentage !== null && parallelOcrTracker.stats?.percentage !== null ? (
                         <>
-                          {startPercentage.toFixed(2)}% → {parallelOcrTracker.stats.percentage.toFixed(2)}%
+                          {startPercentage.toFixed(2)}% → {parallelOcrTracker.stats!.percentage.toFixed(2)}%
                         </>
                       ) : (
                         `${parallelOcrTracker.stats?.percentage?.toFixed(2) || '0.00'}%`
                       )}
                       {startPercentage !== null && parallelOcrTracker.stats?.percentage !== null && (
-                        <> | {(parallelOcrTracker.stats.percentage - startPercentage).toFixed(2)}%</>
+                        <> | {(parallelOcrTracker.stats!.percentage - startPercentage).toFixed(2)}%</>
                       )}
                       )
                     </div>
