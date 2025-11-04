@@ -250,6 +250,13 @@ impl OcrTracker {
         }
         drop(state);
 
+        #[cfg(debug_assertions)]
+        println!("📋 Starting tracking with ROIs:");
+        #[cfg(debug_assertions)]
+        println!("   Level ROI: ({}, {}) {}x{}", level_roi.x, level_roi.y, level_roi.width, level_roi.height);
+        #[cfg(debug_assertions)]
+        println!("   EXP ROI: ({}, {}) {}x{}", exp_roi.x, exp_roi.y, exp_roi.width, exp_roi.height);
+
         // Reset stop signal
         *self.stop_signal.lock().await = false;
 
@@ -744,6 +751,11 @@ impl OcrTracker {
 
                 match screen_capture.capture_region(&roi) {
                     Ok(image) => {
+                        #[cfg(debug_assertions)]
+                        println!("📸 EXP capture: ROI({},{},{}x{}), Image({}x{})", 
+                            roi.x, roi.y, roi.width, roi.height, 
+                            image.width(), image.height());
+                        
                         // Convert image to raw bytes for comparison
                         let current_bytes = image.as_bytes().to_vec();
 
@@ -762,6 +774,10 @@ impl OcrTracker {
                             let service = ocr_service.lock();
                             service.http_client.clone()
                         };
+                        
+                        #[cfg(debug_assertions)]
+                        println!("🔍 Sending EXP image to OCR server...");
+                        
                         match http_client.recognize_exp(&image).await {
                             Ok(result) => {
                                 let should_emit = {

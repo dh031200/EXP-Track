@@ -74,19 +74,9 @@ impl ScreenCapture {
         // Convert RgbaImage to DynamicImage
         let image = DynamicImage::ImageRgba8(rgba_image);
 
-        // Note: Platform-specific coordinate adjustment is handled in frontend
-        // macOS: Frontend adds window position (includes menu bar offset)
-        // Windows: Frontend subtracts window frame offset
-        
-        // Apply scale factor to convert logical coordinates to physical pixels
-        // macOS: xcap already returns physical coordinates, so ROI is already in physical pixels
-        // Windows/Linux: Need to scale up from logical to physical
-        #[cfg(target_os = "macos")]
-        let (physical_x, physical_y, physical_width, physical_height) = {
-            (roi.x as u32, roi.y as u32, roi.width as u32, roi.height as u32)
-        };
-
-        #[cfg(not(target_os = "macos"))]
+        // ROI coordinates are in logical pixels (from frontend)
+        // xcap.capture_image() returns physical pixels on all platforms
+        // Therefore, we need to scale logical → physical on all platforms including macOS
         let (physical_x, physical_y, physical_width, physical_height) = {
             (
                 (roi.x as f64 * self.scale_factor) as u32,
@@ -143,6 +133,11 @@ impl ScreenCapture {
             .map_err(|e| format!("Failed to capture screen: {}", e))?;
 
         Ok(DynamicImage::ImageRgba8(rgba_image))
+    }
+
+    /// Get the scale factor
+    pub fn get_scale_factor(&self) -> f64 {
+        self.scale_factor
     }
 
     /// Get monitor dimensions in logical coordinates
