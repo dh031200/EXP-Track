@@ -9,6 +9,27 @@ export interface PotionConfig {
 }
 
 /**
+ * Tracking configuration
+ */
+export interface TrackingConfig {
+  update_interval: number;
+  track_meso: boolean;
+  auto_start: boolean;
+  auto_pause_threshold: number;
+}
+
+/**
+ * Full Application Configuration
+ * (Partial definition for now, expand as needed)
+ */
+export interface AppConfig {
+  potion: PotionConfig;
+  tracking: TrackingConfig;
+  // Add other sections as needed
+  [key: string]: any; 
+}
+
+/**
  * Valid inventory slot names
  */
 export const VALID_SLOTS = ['shift', 'ins', 'home', 'pup', 'ctrl', 'del', 'end', 'pdn'] as const;
@@ -33,4 +54,18 @@ export async function setPotionSlotConfig(hpSlot: string, mpSlot: string): Promi
       mp_potion_slot: mpSlot,
     },
   });
+}
+
+/**
+ * Load full application configuration
+ */
+export async function loadAppConfig(): Promise<AppConfig> {
+  return await invoke<AppConfig>('load_config');
+}
+
+/**
+ * Save full application configuration
+ */
+export async function saveAppConfig(config: AppConfig): Promise<void> {
+  return await invoke('save_config', { config });
 }

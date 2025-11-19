@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
 from pydantic import BaseModel
 from rapidocr import RapidOCR
-
+import cv2 # OpenCV for image preprocessing
 
 # Determine models directory path (works for both dev and bundled app)
 if getattr(sys, 'frozen', False):
@@ -136,21 +136,6 @@ class OcrResponse(BaseModel):
     raw_text: str  # Legacy: concatenated text for backward compatibility
 
 
-# Legacy response models (not used anymore)
-# class LevelResponse(BaseModel):
-#     level: int
-#     raw_text: str
-#
-# class ExpResponse(BaseModel):
-#     absolute: int
-#     percentage: float
-#     raw_text: str
-#
-# class HpMpResponse(BaseModel):
-#     value: int
-#     raw_text: str
-
-
 # Helper functions
 def decode_base64_image(base64_str: str) -> np.ndarray:
     """Decode base64 string to numpy array"""
@@ -185,13 +170,43 @@ def parse_rapidocr_result(result) -> tuple[List[TextBox], str]:
     raw_text = " ".join(texts)
     return (boxes, raw_text)
 
+def preprocess_image(image: np.ndarray) -> np.ndarray:
+    """
+    Preprocess image for better OCR accuracy on game UI text.
+    1. Convert to Grayscale
+    2. Upscale (2x) - critical for small numbers
+    3. Invert if text is white-on-dark (common in games)
+    4. Binarize (Threshold) - make text crisp black
+    """
+    try:
+        # Convert to grayscale if color
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        else:
+            gray = image
 
-# OCR Endpoints - Legacy endpoints (not used, parsing done in Rust)
-# @app.post("/ocr/level", response_model=LevelResponse)
-# @app.post("/ocr/exp", response_model=ExpResponse)
-# @app.post("/ocr/hp", response_model=HpMpResponse)
-# @app.post("/ocr/mp", response_model=HpMpResponse)
-
+        # Check image size - if it's a small ROI strip, upscale it
+        h, w = gray.shape
+        scale = 1.0
+        if h < 100: # Typical height for Level/EXP number strip is small
+            scale = 2.0
+            gray = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+        
+        # Check brightness to determine if inversion is needed
+        # Game UI often has white text on dark background. OCR prefers black text on white.
+        mean_brightness = np.mean(gray)
+        if mean_brightness < 127:
+            # Invert to get black text on white
+            gray = 255 - gray
+        
+        # Enhance contrast/Binarize
+        # OTSU thresholding finds optimal separation
+        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        
+        return binary
+    except Exception as e:
+        print(f"⚠️ Preprocessing failed: {e}, using original image")
+        return image
 
 def _run_ocr_sync(image: np.ndarray, engine_idx: int) -> tuple[List[TextBox], str]:
     """
@@ -202,8 +217,11 @@ def _run_ocr_sync(image: np.ndarray, engine_idx: int) -> tuple[List[TextBox], st
     # Use dedicated engine for this worker (no contention)
     engine = ocr_engines[engine_idx]
 
+    # Preprocess image (Upscale, Grayscale, Threshold)
+    processed_image = preprocess_image(image)
+
     # RapidOCR returns a RapidOCROutput object with txts, boxes, scores attributes
-    ocr_output = engine(image, text_score=0.85)
+    ocr_output = engine(processed_image, text_score=0.85)
 
     # Extract structured data from RapidOCROutput
     boxes = []

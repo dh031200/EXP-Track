@@ -66,22 +66,37 @@ impl ExpCalculator {
         if data.level == initial.level {
             // Check against LAST reading (not initial) for better accuracy
             if let Some(ref last) = self.last_data {
-                if last.level == data.level && last.exp > 0 {
-                    let ratio = data.exp as f64 / last.exp as f64;
-
-                    // Detect both explosions (ratio > 10) and drops (ratio < 0.1)
-                    if ratio > 10.0 || ratio < 0.1 {
-                        #[cfg(debug_assertions)]
+                if last.level == data.level {
+                    // 1. Negative EXP Check: EXP should never decrease within the same level
+                    // Allow small variance for potential minor OCR wobbles, but generally NO drops allowed
+                    if data.exp < last.exp {
+                         #[cfg(debug_assertions)]
                         {
-                            println!("🦀 [Calculator] 🔍 OCR Check: ratio={:.2}x (expected: 0.1x - 10.0x)", ratio);
-                            println!("🦀 [Calculator] ⚠️ OCR ERROR DETECTED: last_exp={}, current_exp={} (ratio={:.2}x)",
-                                    last.exp, data.exp, ratio);
-                            println!("🦀 [Calculator] 🚫 Rejecting this reading - keeping previous value");
+                            println!("🦀 [Calculator] ⚠️ OCR ERROR: Negative EXP gain detected ({} -> {})", last.exp, data.exp);
+                            println!("🦀 [Calculator] 🚫 Rejecting drop in EXP within same level");
                         }
-
-                        // Don't update last_data - keep the good value
-                        // Return stats based on last good data
                         return self.update(last.clone());
+                    }
+
+                    // 2. Ratio Check: Only apply for meaningful values (> 1000) to avoid division by zero or small number volatility
+                    if last.exp > 1000 {
+                        let ratio = data.exp as f64 / last.exp as f64;
+
+                        // Detect both explosions (ratio > 10) and significant drops (ratio < 0.1)
+                        // Also check for impossibly high gains in short time (e.g. > 200% gain in 1 second is suspicious unless low levels)
+                        if ratio > 10.0 || ratio < 0.1 {
+                            #[cfg(debug_assertions)]
+                            {
+                                println!("🦀 [Calculator] 🔍 OCR Check: ratio={:.2}x (expected: 0.1x - 10.0x)", ratio);
+                                println!("🦀 [Calculator] ⚠️ OCR ERROR DETECTED: last_exp={}, current_exp={} (ratio={:.2}x)",
+                                        last.exp, data.exp, ratio);
+                                println!("🦀 [Calculator] 🚫 Rejecting this reading - keeping previous value");
+                            }
+
+                            // Don't update last_data - keep the good value
+                            // Return stats based on last good data
+                            return self.update(last.clone());
+                        }
                     }
                 }
             }
@@ -92,28 +107,53 @@ impl ExpCalculator {
 
         // Handle level up
         if data.level > last.level {
-            let max_exp = self
-                .level_table
-                .get_exp_for_level(last.level)
-                .ok_or_else(|| format!("Invalid level: {}", last.level))?;
+            #[cfg(debug_assertions)]
+            println!("🦀 [Calculator] ✨ Level Up Detected: {} -> {}", last.level, data.level);
 
-            let exp_gained = max_exp.saturating_sub(initial.exp);
-            self.completed_levels_exp += exp_gained;
+            let max_exp_result = self.level_table.get_exp_for_level(last.level);
+            
+            let exp_gained_from_prev_level = match max_exp_result {
+                Some(max_exp) => max_exp.saturating_sub(initial.exp),
+                None => {
+                     #[cfg(debug_assertions)]
+                     println!("🦀 [Calculator] ⚠️ Unknown Max EXP for level {}. Assuming 0 remaining gain from prev level.", last.level);
+                     0 
+                }
+            };
+            
+            // Total gained = Remainder of old level + All of new level (current data.exp)
+            // This ensures if we go 129 (99%) -> 130 (1%), we gain that 1% + the missing 1% of 129.
+            // Note: We rely on data.exp being "fresh" (starting from 0 or low value).
+            // If user connects late (130 | 50%), we treat that 50% as gained this session if we just leveled up.
+            let total_transition_gain = exp_gained_from_prev_level + data.exp;
+
+            self.completed_levels_exp += total_transition_gain;
 
             let percentage_gained = 100.0 - initial.percentage;
             self.completed_levels_percentage += percentage_gained;
 
-            // Reset initial data for new level
+            // Reset initial data for new level -> It effectively starts "now" with the current data
+            // We set initial.exp to data.exp so that the "diff" calculation below works naturally (diff will be 0 initially)
+            // But wait, if we set initial to data, the update logic below calculates `data.exp - initial.exp`.
+            // If we just added `data.exp` to `completed_levels_exp`, we should set initial.exp to `data.exp`.
             self.initial_data = Some(ExpData {
                 level: data.level,
-                exp: 0,
-                percentage: 0.0,
+                exp: data.exp, 
+                percentage: data.percentage,
                 meso: data.meso,
             });
+            
+            // Update 'initial' reference for the calculation below
+            // We just replaced self.initial_data, so get the new one.
+            // The 'initial' variable in the outer scope is now stale.
         }
 
-        // Calculate accumulated values
+        // Re-fetch initial (it might have changed due to level up)
         let initial = self.initial_data.as_ref().unwrap();
+        
+        // Calculate accumulated values
+        // If we just leveled up, initial.exp == data.exp, so exp_diff is 0.
+        // The gain was already added to `completed_levels_exp`.
         let exp_diff = data.exp.saturating_sub(initial.exp);
         let total_exp = exp_diff + self.completed_levels_exp;
         let percentage_diff = data.percentage - initial.percentage;

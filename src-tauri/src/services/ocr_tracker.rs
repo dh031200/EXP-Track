@@ -645,7 +645,21 @@ impl OcrTracker {
                     }
                 }
 
-                sleep(Duration::from_millis(500)).await;
+                // Dynamic sleep based on config
+                let interval_ms = {
+                    if let Some(config_state) = app.try_state::<std::sync::Mutex<ConfigManager>>() {
+                        match config_state.lock() {
+                            Ok(manager) => match manager.load() {
+                                Ok(config) => (config.tracking.update_interval.max(1) as f64 * 1000.0) as u64,
+                                Err(_) => 1000
+                            },
+                            Err(_) => 1000
+                        }
+                    } else {
+                        1000
+                    }
+                };
+                sleep(Duration::from_millis(interval_ms)).await;
             }
 
             #[cfg(debug_assertions)]
@@ -824,7 +838,21 @@ impl OcrTracker {
                     }
                 }
 
-                sleep(Duration::from_millis(500)).await;
+                // Dynamic sleep based on config
+                let interval_ms = {
+                    if let Some(config_state) = app.try_state::<std::sync::Mutex<ConfigManager>>() {
+                        match config_state.lock() {
+                            Ok(manager) => match manager.load() {
+                                Ok(config) => (config.tracking.update_interval.max(1) as f64 * 1000.0) as u64,
+                                Err(_) => 1000
+                            },
+                            Err(_) => 1000
+                        }
+                    } else {
+                        1000
+                    }
+                };
+                sleep(Duration::from_millis(interval_ms)).await;
             }
 
             #[cfg(debug_assertions)]
