@@ -582,7 +582,7 @@ let crop_h = (roi.height as f32 * 0.45) as u32;
                                         // Binary threshold
                                         if let Some(gray) = number_img.as_mut_luma8() {
                                             for p in gray.pixels_mut() {
-                                                *p = if p.0[0] > 150 { image::Luma([255]) } else { image::Luma([0]) };
+                                                *p = if p.0[0] > 180 { image::Luma([255]) } else { image::Luma([0]) };
                                             }
                                         }
                                         
@@ -612,7 +612,7 @@ let crop_h = (roi.height as f32 * 0.45) as u32;
                                         // Binary threshold
                                         if let Some(gray) = number_img.as_mut_luma8() {
                                             for p in gray.pixels_mut() {
-                                                *p = if p.0[0] > 150 { image::Luma([255]) } else { image::Luma([0]) };
+                                                *p = if p.0[0] > 180 { image::Luma([255]) } else { image::Luma([0]) };
                                             }
                                         }
                                         
