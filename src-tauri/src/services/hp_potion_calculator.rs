@@ -46,17 +46,12 @@ impl HpPotionCalculator {
 
                 if used > MAX_USAGE_PER_UPDATE {
                     // OCR error - reject
-                    #[cfg(debug_assertions)]
-                    println!("🧪 [HP Calculator] ⚠️ OCR ERROR: {} -> {} (-{}) exceeds threshold ({})",
-                        last, current_count, used, MAX_USAGE_PER_UPDATE);
+                    println!("🧪 [HP] OCR ERROR: {} -> {} (-{})", last, current_count, used);
                 } else {
                     // Normal usage
                     self.total_used += used;
                     self.last_count = Some(current_count);
-
-                    #[cfg(debug_assertions)]
-                    println!("🧪 [HP Calculator] Used: {} -> {} (-{}), total: {}",
-                        last, current_count, used, self.total_used);
+                    println!("🧪 [HP] Used: {} -> {} (-{}), total: {}", last, current_count, used, self.total_used);
                 }
             } else if current_count > last {
                 // Potion count increased - validate 5 times
@@ -66,41 +61,27 @@ impl HpPotionCalculator {
                             // Verified - accept increase
                             self.last_count = Some(current_count);
                             self.pending_increase = None;
-
-                            #[cfg(debug_assertions)]
-                            println!("🧪 [HP Calculator] ✅ Increase verified: {} -> {} (+{})",
-                                last, current_count, current_count - last);
+                            println!("🧪 [HP] ✅ Increase verified: +{}", current_count - last);
                         } else {
                             // Continue verification
                             self.pending_increase = Some((current_count, count + 1));
-
-                            #[cfg(debug_assertions)]
-                            println!("🧪 [HP Calculator] 🔍 Verifying increase: {}/{}", count + 1, 5);
                         }
                     }
                     _ => {
                         // New increase - start verification
                         self.pending_increase = Some((current_count, 1));
-
-                        #[cfg(debug_assertions)]
-                        println!("🧪 [HP Calculator] 🔍 New increase detected: {} -> {}, verifying...",
-                            last, current_count);
+                        println!("🧪 [HP] 🔍 Increase detected: {} -> {}, verifying...", last, current_count);
                     }
                 }
             } else if let Some((_, _)) = self.pending_increase {
                 // Value reverted during verification
                 self.pending_increase = None;
-
-                #[cfg(debug_assertions)]
-                println!("🧪 [HP Calculator] 🚫 Increase cancelled (value reverted)");
             }
         } else {
             // First reading
             self.last_count = Some(current_count);
             self.start_time.get_or_insert_with(Instant::now);
-
-            #[cfg(debug_assertions)]
-            println!("🧪 [HP Calculator] Started tracking: {}", current_count);
+            println!("🧪 [HP] Started tracking: {}", current_count);
         }
 
         // Calculate per-minute rate

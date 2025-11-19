@@ -62,7 +62,6 @@ export function useExpTracker(): UseExpTrackerReturn {
       }));
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      console.error('❌ Failed to get tracking stats:', errorMsg);
       setState(prev => ({ ...prev, error: errorMsg }));
     }
   }, []);
@@ -85,11 +84,8 @@ export function useExpTracker(): UseExpTrackerReturn {
 
       // Start polling stats every 500ms
       pollingIntervalRef.current = window.setInterval(pollStats, 500);
-
-      console.log('✅ Tracking started with Rust backend (auto inventory ROI)');
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      console.error('❌ Failed to start tracking:', errorMsg);
       setState(prev => ({ ...prev, error: errorMsg }));
     }
   }, [levelRoi, expRoi, pollStats]);
@@ -109,10 +105,9 @@ export function useExpTracker(): UseExpTrackerReturn {
     try {
       await stopOcrTracking();
       setState(prev => ({ ...prev, isTracking: false }));
-      console.log('⏹️  Tracking stopped');
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      console.error('❌ Failed to stop tracking:', errorMsg);
+      console.error('Failed to stop tracking:', errorMsg);
     }
   }, []);
 
@@ -129,10 +124,8 @@ export function useExpTracker(): UseExpTrackerReturn {
         isTracking: false,
         error: null,
       });
-      console.log('🔄 Tracking session reset');
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      console.error('❌ Failed to reset tracking:', errorMsg);
       setState(prev => ({ ...prev, error: errorMsg }));
     }
   }, [stop]);

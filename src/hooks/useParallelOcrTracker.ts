@@ -72,7 +72,6 @@ export function useParallelOcrTracker() {
     try {
       // Set up event listeners for real-time updates
       const levelUnlisten = await listen<{ level: number }>('ocr:level-update', async (event) => {
-        console.log('⚡ [Event] Level update:', event.payload.level);
         useLevelStore.getState().setLevel({
           level: event.payload.level,
           raw_text: "",
@@ -88,7 +87,6 @@ export function useParallelOcrTracker() {
       });
 
       const expUnlisten = await listen<{ exp: number; percentage: number }>('ocr:exp-update', async (event) => {
-        console.log('⚡ [Event] EXP update:', event.payload.exp, event.payload.percentage);
         useExpStore.getState().setExp({
           absolute: event.payload.exp,
           percentage: event.payload.percentage,
@@ -118,7 +116,6 @@ export function useParallelOcrTracker() {
       });
 
       const hpPotionUnlisten = await listen<{ hp_potion_count: number }>('ocr:hp-potion-update', async (event) => {
-        console.log('⚡ [Event] HP Potion update:', event.payload.hp_potion_count);
         useHpPotionStore.getState().setHpPotionCount(event.payload.hp_potion_count);
 
         // Update stats to reflect potion usage changes
@@ -131,7 +128,6 @@ export function useParallelOcrTracker() {
       });
 
       const mpPotionUnlisten = await listen<{ mp_potion_count: number }>('ocr:mp-potion-update', async (event) => {
-        console.log('⚡ [Event] MP Potion update:', event.payload.mp_potion_count);
         useMpPotionStore.getState().setMpPotionCount(event.payload.mp_potion_count);
 
         // Update stats to reflect potion usage changes
@@ -150,7 +146,6 @@ export function useParallelOcrTracker() {
         levelRoi,
         expRoi,
       });
-      console.log('✅ Rust OCR tracker started with event-driven updates');
 
       // Poll stats periodically to update time-based calculations (exp_per_hour, etc.)
       if (statsIntervalRef.current !== null) {
@@ -187,9 +182,8 @@ export function useParallelOcrTracker() {
 
     try {
       await invoke('stop_ocr_tracking');
-      console.log('⏹️  Rust OCR tracker stopped');
     } catch (error) {
-      console.error('❌ Failed to stop Rust OCR tracker:', error);
+      console.error('Failed to stop Rust OCR tracker:', error);
     }
   }, []);
 
@@ -206,9 +200,8 @@ export function useParallelOcrTracker() {
     try {
       await invoke('reset_tracking');
       await resetExpSession();
-      console.log('🔄 Rust tracking session reset');
     } catch (err) {
-      console.error('❌ Reset failed:', err);
+      console.error('Reset failed:', err);
     }
   }, [stop]);
 

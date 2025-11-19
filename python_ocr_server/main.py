@@ -248,8 +248,6 @@ def _run_ocr_sync(image: np.ndarray, engine_idx: int) -> tuple[List[TextBox], st
                 ))
                 texts.append(text)
 
-        print(f"[Engine {engine_idx}] Created {len(boxes)} TextBox objects from {len(txts)} texts")
-
     raw_text = " ".join(texts)
     return (boxes, raw_text)
 
@@ -284,11 +282,6 @@ async def recognize_text(request: ImageRequest):
             boxes=boxes,
             raw_text=raw_text
         )
-
-        # Debug: Print response structure
-        print(f"[DEBUG] OCR Response: boxes_count={len(boxes)}, raw_text='{raw_text}'")
-        if boxes:
-            print(f"[DEBUG] First box: {boxes[0]}")
 
         return response
 
