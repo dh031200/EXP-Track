@@ -446,9 +446,10 @@ impl OcrTracker {
                             }
                         }
 
-                        // Spawn Inventory OCR as independent task with ROI memoization
+                                // Spawn Inventory OCR as independent task with ROI memoization
                         {
                             let ocr_service_clone = Arc::clone(&ocr_service);
+                            let ocr_service_clone2 = Arc::clone(&ocr_service); // For outer async block
                             let image = Arc::clone(&image);
                             let app = app.clone();
                             let state = Arc::clone(&state);
@@ -456,110 +457,207 @@ impl OcrTracker {
                             let memoized_roi = memoized_inventory_roi.clone();
 
                             let updated_roi = tokio::spawn(async move {
-                                let inventory_result = tokio::task::spawn_blocking(move || {
+                                // We need to run async OCR calls, so we can't use spawn_blocking for the whole thing
+                                // But we need blocking for image processing.
+                                // Strategy: Do image processing in blocking block, then async OCR.
+                                
+                                let (inventory_image, roi_coords) = tokio::task::spawn_blocking(move || {
                                     let service = ocr_service_clone.lock();
+                                    
+                                    // Helper to standardize image to 522x255
+                                    let standardize = |img: &DynamicImage| -> DynamicImage {
+                                        let gray = img.to_luma8();
+                                        let resized = image::imageops::resize(
+                                            &gray,
+                                            522,
+                                            255,
+                                            image::imageops::FilterType::Nearest,
+                                        );
+                                        DynamicImage::ImageLuma8(resized)
+                                    };
 
                                     // Try memoized ROI first (fast path)
                                     if let Some((left, top, right, bottom)) = memoized_roi {
                                         #[cfg(debug_assertions)]
                                         {
-                                            let t0 = std::time::Instant::now();
                                             println!("🎯 Using memoized Inventory ROI: ({}, {}, {}, {})", left, top, right, bottom);
-
-                                            // Add padding to handle slight position changes (100px on each side)
-                                            let padding = 100;
-                                            let img_width = image.width();
-                                            let img_height = image.height();
-                                            let padded_left = left.saturating_sub(padding);
-                                            let padded_top = top.saturating_sub(padding);
-                                            let padded_right = (right + padding).min(img_width - 1);
-                                            let padded_bottom = (bottom + padding).min(img_height - 1);
-
-                                            let t1 = std::time::Instant::now();
-                                            println!("  ⏱️  ROI calculation: {}ms", (t1 - t0).as_millis());
-
-                                            // Crop to padded region
-                                            let crop_width = padded_right - padded_left + 1;
-                                            let crop_height = padded_bottom - padded_top + 1;
-                                            println!("  📐 Cropping {}x{} → {}x{}", img_width, img_height, crop_width, crop_height);
-                                            let cropped = image.crop_imm(padded_left, padded_top, crop_width, crop_height);
-
-                                            let t2 = std::time::Instant::now();
-                                            println!("  ⏱️  Crop time: {}ms", (t2 - t1).as_millis());
-
-                                            // Try recognition on cropped region using full pipeline
-                                            println!("  🔄 Calling recognize_inventory on cropped region...");
-                                            let recognition_result = service.recognize_inventory(&cropped);
-
-                                            let t3 = std::time::Instant::now();
-                                            println!("  ⏱️  recognize_inventory time: {}ms", (t3 - t2).as_millis());
-
-                                            if let Ok(results) = recognition_result {
-                                                println!("✅ Inventory OCR succeeded with memoized ROI (total: {}ms)", (t3 - t0).as_millis());
-                                                return Ok((results, Some((left, top, right, bottom))));
-                                            }
-
-                                            println!("⚠️  Memoized ROI failed, falling back to full detection");
                                         }
 
-                                        #[cfg(not(debug_assertions))]
-                                        {
-                                            // Non-debug version without timing
-                                            let padding = 100;
-                                            let img_width = image.width();
-                                            let img_height = image.height();
-                                            let padded_left = left.saturating_sub(padding);
-                                            let padded_top = top.saturating_sub(padding);
-                                            let padded_right = (right + padding).min(img_width - 1);
-                                            let padded_bottom = (bottom + padding).min(img_height - 1);
+                                        // Add padding
+                                        let padding = 100;
+                                        let img_width = image.width();
+                                        let img_height = image.height();
+                                        let padded_left = left.saturating_sub(padding);
+                                        let padded_top = top.saturating_sub(padding);
+                                        let padded_right = (right + padding).min(img_width - 1);
+                                        let padded_bottom = (bottom + padding).min(img_height - 1);
 
-                                            let crop_width = padded_right - padded_left + 1;
-                                            let crop_height = padded_bottom - padded_top + 1;
-                                            let cropped = image.crop_imm(padded_left, padded_top, crop_width, crop_height);
+                                        let crop_width = padded_right - padded_left + 1;
+                                        let crop_height = padded_bottom - padded_top + 1;
+                                        let cropped = image.crop_imm(padded_left, padded_top, crop_width, crop_height);
 
-                                            if let Ok(results) = service.recognize_inventory(&cropped) {
-                                                return Ok((results, Some((left, top, right, bottom))));
+                                        // We need to find the exact inventory within this cropped region to get the 522x255 image
+                                        // Use the matcher's detection logic
+                                        if let Some(matcher) = &service.inventory_matcher {
+                                            if let Ok((inv_img, _)) = matcher.detect_inventory_region_with_coords(&cropped) {
+                                                return (Some(inv_img), Some((left, top, right, bottom)));
                                             }
                                         }
+                                        
+                                        #[cfg(debug_assertions)]
+                                        println!("⚠️  Memoized ROI failed to re-detect inventory");
                                     }
 
-                                    // Fallback: Full detection (slow path)
+                                    // Fallback: Full detection
                                     #[cfg(debug_assertions)]
                                     println!("🔍 Performing full Inventory region detection");
 
-                                    match service.recognize_inventory(&*image) {
-                                        Ok(results) => {
-                                            // Try to get ROI coordinates for memoization
-                                            if let Some(matcher) = &service.inventory_matcher {
-                                                if let Ok((_, coords)) = matcher.detect_inventory_region_with_coords(&*image) {
-                                                    #[cfg(debug_assertions)]
-                                                    println!("💾 Memoizing Inventory ROI: {:?}", coords);
-                                                    
-                                                    // Save original inventory preview image (not processed)
-                                                    let (left, top, right, bottom) = coords;
-                                                    let width = right - left + 1;
-                                                    let height = bottom - top + 1;
-                                                    let cropped_original = image::imageops::crop_imm(&*image, left, top, width, height);
-                                                    let dynamic_img = DynamicImage::ImageRgba8(cropped_original.to_image());
-                                                    save_inventory_preview(&dynamic_img);
-                                                    
-                                                    return Ok((results, Some(coords)));
-                                                }
-                                            }
-                                            Ok((results, None))
+                                    if let Some(matcher) = &service.inventory_matcher {
+                                        if let Ok((inv_img, coords)) = matcher.detect_inventory_region_with_coords(&*image) {
+                                            #[cfg(debug_assertions)]
+                                            println!("💾 Memoizing Inventory ROI: {:?}", coords);
+                                            return (Some(inv_img), Some(coords));
                                         }
-                                        Err(e) => Err(e)
                                     }
-                                }).await;
 
-                                match inventory_result {
-                                    Ok(Ok((results, roi))) => (Ok(results), roi),
-                                    Ok(Err(e)) => (Err(e), None),
-                                    Err(e) => (Err(format!("Task failed: {}", e)), None)
+                                    (None, None)
+                                }).await.unwrap_or((None, None));
+
+                                if let Some(inv_img) = inventory_image {
+                                    // Load potion config
+                                    let potion_config = {
+                                        if let Some(config_state) = app.try_state::<std::sync::Mutex<ConfigManager>>() {
+                                            match config_state.lock() {
+                                                Ok(manager) => match manager.load() {
+                                                    Ok(config) => config.potion,
+                                                    Err(_) => PotionConfig::default()
+                                                },
+                                                Err(_) => PotionConfig::default()
+                                            }
+                                        } else {
+                                            PotionConfig::default()
+                                        }
+                                    };
+
+                                    // Get OCR client
+                                    let http_client = {
+                                        let service = ocr_service_clone2.lock();
+                                        service.http_client.clone()
+                                    };
+
+                                    // We need the slot ROIs. Let's get them from the service.
+                                    let (hp_roi, mp_roi) = {
+                                        let service = ocr_service_clone2.lock();
+                                        if let Some(matcher) = &service.inventory_matcher {
+                                            (
+                                                matcher.slot_rois.get(&potion_config.hp_potion_slot).cloned(),
+                                                matcher.slot_rois.get(&potion_config.mp_potion_slot).cloned()
+                                            )
+                                        } else {
+                                            (None, None)
+                                        }
+                                    };
+
+                                    let mut hp_count = 0;
+                                    let mut mp_count = 0;
+
+                                    // Process HP Potion
+                                    if let Some(roi) = hp_roi {
+                                        let slot_img = inv_img.crop_imm(roi.x, roi.y, roi.width, roi.height);
+                                        // Crop bottom 45% for number
+                                        let crop_h = (roi.height as f32 * 0.45) as u32;
+                                        let crop_y = roi.height - crop_h;
+                                        
+                                        let number_part = slot_img.crop_imm(0, crop_y, roi.width, crop_h);
+                                        
+                                        // Resize to 92x43 and apply binary threshold
+                                        let resized = image::imageops::resize(
+                                            &number_part,
+                                            92,
+                                            43,
+                                            image::imageops::FilterType::Triangle
+                                        );
+                                        let mut number_img = image::DynamicImage::ImageLuma8(resized);
+                                        
+                                        // Binary threshold
+                                        if let Some(gray) = number_img.as_mut_luma8() {
+                                            for p in gray.pixels_mut() {
+                                                *p = if p.0[0] > 150 { image::Luma([255]) } else { image::Luma([0]) };
+                                            }
+                                        }
+                                        
+                                        if let Ok(count) = http_client.recognize_hp_potion_count(&number_img).await {
+                                            hp_count = count;
+                                        }
+                                    }
+
+                                    // Process MP Potion
+                                    if let Some(roi) = mp_roi {
+                                        let slot_img = inv_img.crop_imm(roi.x, roi.y, roi.width, roi.height);
+                                        // Crop bottom 45% for number
+                                        let crop_h = (roi.height as f32 * 0.45) as u32;
+                                        let crop_y = roi.height - crop_h;
+                                        
+                                        let number_part = slot_img.crop_imm(0, crop_y, roi.width, crop_h);
+                                        
+                                        // Resize to 92x43 and apply binary threshold
+                                        let resized = image::imageops::resize(
+                                            &number_part,
+                                            92,
+                                            43,
+                                            image::imageops::FilterType::Triangle
+                                        );
+                                        let mut number_img = image::DynamicImage::ImageLuma8(resized);
+                                        
+                                        // Binary threshold
+                                        if let Some(gray) = number_img.as_mut_luma8() {
+                                            for p in gray.pixels_mut() {
+                                                *p = if p.0[0] > 150 { image::Luma([255]) } else { image::Luma([0]) };
+                                            }
+                                        }
+                                        
+                                        if let Ok(count) = http_client.recognize_mp_potion_count(&number_img).await {
+                                            mp_count = count;
+                                        }
+                                    }
+
+                                    // Update state
+                                    let mut state = state.lock().await;
+                                    state.hp_potion_count = Some(hp_count);
+                                    state.mp_potion_count = Some(mp_count);
+                                    
+                                    // Update calculators
+                                    let (hp_used, hp_per_min) = state.hp_calculator.update(hp_count);
+                                    state.latest_stats.hp_potions_used = hp_used as i32;
+                                    state.latest_stats.hp_potions_per_minute = hp_per_min;
+
+                                    let (mp_used, mp_per_min) = state.mp_calculator.update(mp_count);
+                                    state.latest_stats.mp_potions_used = mp_used as i32;
+                                    state.latest_stats.mp_potions_per_minute = mp_per_min;
+                                    drop(state);
+
+                                    // Emit events
+                                    #[cfg(debug_assertions)]
+                                    println!("📤 Emitting HP potion update event: {}", hp_count);
+                                    app.emit("ocr:hp-potion-update", HpPotionUpdate { hp_potion_count: hp_count }).ok();
+
+                                    #[cfg(debug_assertions)]
+                                    println!("📤 Emitting MP potion update event: {}", mp_count);
+                                    app.emit("ocr:mp-potion-update", MpPotionUpdate { mp_potion_count: mp_count }).ok();
+                                    
+                                    #[cfg(debug_assertions)]
+                                    {
+                                        let elapsed = start.elapsed().as_millis();
+                                        println!("✅ Inventory OCR (ONNX): HP={} MP={} - {}ms", hp_count, mp_count, elapsed);
+                                    }
+
+                                    (Ok(()), roi_coords)
+                                } else {
+                                    (Err("Failed to detect inventory".to_string()), None)
                                 }
                             }).await;
 
-                            let (inventory_result, new_roi) = match updated_roi {
+                            let (_, new_roi) = match updated_roi {
                                 Ok(result) => result,
                                 Err(e) => (Err(format!("Spawn failed: {}", e)), None)
                             };
@@ -567,72 +665,6 @@ impl OcrTracker {
                             // Update memoized ROI if we got a new one
                             if new_roi.is_some() {
                                 memoized_inventory_roi = new_roi;
-                            }
-
-                            match inventory_result {
-                                Ok(inventory) => {
-                                        // Load potion config from app state
-                                        let potion_config = {
-                                            if let Some(config_state) = app.try_state::<std::sync::Mutex<ConfigManager>>() {
-                                                match config_state.lock() {
-                                                    Ok(manager) => match manager.load() {
-                                                        Ok(config) => config.potion,
-                                                        Err(_) => PotionConfig::default()
-                                                    },
-                                                    Err(_) => PotionConfig::default()
-                                                }
-                                            } else {
-                                                PotionConfig::default()
-                                            }
-                                        };
-
-                                        // Extract HP and MP counts from inventory
-                                        let hp_potion_count = *inventory.get(&potion_config.hp_potion_slot).unwrap_or(&0);
-                                        let mp_potion_count = *inventory.get(&potion_config.mp_potion_slot).unwrap_or(&0);
-
-                                        // Update state and calculators
-                                        let mut state = state.lock().await;
-                                        state.hp_potion_count = Some(hp_potion_count);
-                                        state.mp_potion_count = Some(mp_potion_count);
-
-                                        // Update HP calculator
-                                        let (hp_used, hp_per_min) = state.hp_calculator.update(hp_potion_count);
-                                        state.latest_stats.hp_potions_used = hp_used as i32;
-                                        state.latest_stats.hp_potions_per_minute = hp_per_min;
-
-                                        // Update MP calculator
-                                        let (mp_used, mp_per_min) = state.mp_calculator.update(mp_potion_count);
-                                        state.latest_stats.mp_potions_used = mp_used as i32;
-                                        state.latest_stats.mp_potions_per_minute = mp_per_min;
-
-                                        drop(state);
-
-                                        // Emit events to Frontend
-                                        #[cfg(debug_assertions)]
-                                        println!("📤 Emitting HP potion update event: {}", hp_potion_count);
-                                        if let Err(e) = app.emit("ocr:hp-potion-update", HpPotionUpdate { hp_potion_count }) {
-                                            eprintln!("❌ Failed to emit HP potion update event: {}", e);
-                                        }
-
-                                        #[cfg(debug_assertions)]
-                                        println!("📤 Emitting MP potion update event: {}", mp_potion_count);
-                                        if let Err(e) = app.emit("ocr:mp-potion-update", MpPotionUpdate { mp_potion_count }) {
-                                            eprintln!("❌ Failed to emit MP potion update event: {}", e);
-                                        }
-
-                                        #[cfg(debug_assertions)]
-                                        {
-                                            let elapsed = start.elapsed().as_millis();
-                                            println!("✅ Inventory OCR: HP={} ({}), MP={} ({}) - {}ms",
-                                                hp_potion_count, potion_config.hp_potion_slot,
-                                                mp_potion_count, potion_config.mp_potion_slot,
-                                                elapsed);
-                                        }
-                                }
-                                Err(e) => {
-                                    #[cfg(debug_assertions)]
-                                    eprintln!("❌ Inventory OCR failed: {}", e);
-                                }
                             }
                         }
 

@@ -35,7 +35,7 @@ pub struct DigitDetection {
 /// Inventory template matcher for potion counting
 pub struct InventoryTemplateMatcher {
     templates: Vec<InventoryTemplate>,
-    slot_rois: HashMap<String, SlotRoi>,
+    pub slot_rois: HashMap<String, SlotRoi>,
 }
 
 impl InventoryTemplateMatcher {

@@ -279,6 +279,64 @@ async def recognize_text(request: ImageRequest):
 
 
 @app.get("/health")
+        for i, text in enumerate(txts):
+            if i < len(box_coords) and i < len(scores):
+                boxes.append(TextBox(
+                    box=box_coords[i].tolist() if hasattr(box_coords[i], 'tolist') else box_coords[i],
+                    text=text,
+                    score=float(scores[i])
+                ))
+                texts.append(text)
+
+        print(f"[Engine {engine_idx}] Created {len(boxes)} TextBox objects from {len(txts)} texts")
+
+    raw_text = " ".join(texts)
+    return (boxes, raw_text)
+
+
+@app.post("/ocr", response_model=OcrResponse)
+async def recognize_text(request: ImageRequest):
+    """
+    Unified OCR endpoint - returns structured text boxes with bounding boxes.
+    Rust client will handle NMS filtering and parsing.
+    Uses round-robin load balancing across 4 independent OCR engines.
+    """
+    global current_engine_idx
+
+    try:
+        image = decode_base64_image(request.image_base64)
+
+        # Round-robin engine selection for load balancing
+        engine_idx = current_engine_idx
+        current_engine_idx = (current_engine_idx + 1) % len(ocr_engines)
+
+        # Run CPU-intensive OCR in thread pool with dedicated engine
+        loop = asyncio.get_event_loop()
+        boxes, raw_text = await loop.run_in_executor(
+            executor,
+            _run_ocr_sync,
+            image,
+            engine_idx
+        )
+
+        # Return structured boxes with coordinates for NMS processing
+        response = OcrResponse(
+            boxes=boxes,
+            raw_text=raw_text
+        )
+
+        # Debug: Print response structure
+        print(f"[DEBUG] OCR Response: boxes_count={len(boxes)}, raw_text='{raw_text}'")
+        if boxes:
+            print(f"[DEBUG] First box: {boxes[0]}")
+
+        return response
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"OCR failed: {str(e)}")
+
+
+@app.get("/health")
 async def health_check():
     """Health check endpoint"""
     return {"status": "ok", "engine": "RapidOCR"}

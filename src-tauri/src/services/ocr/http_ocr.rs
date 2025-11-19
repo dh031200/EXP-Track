@@ -90,6 +90,12 @@ impl TextBox {
     }
 }
 
+/// Response for number classification
+#[derive(Deserialize)]
+struct NumberResponse {
+    value: u32,
+}
+
 impl HttpOcrClient {
     /// Create a new HTTP OCR client
     pub fn new() -> Result<Self, String> {
@@ -239,6 +245,32 @@ impl HttpOcrClient {
         Ok(processed_text)
     }
 
+    /// Recognize number from image using custom ONNX model
+    pub async fn recognize_number(&self, image: &DynamicImage) -> Result<u32, String> {
+        let image_base64 = Self::encode_image(image)?;
+        let url = format!("{}/ocr/predict_number", self.base_url);
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&ImageRequest { image_base64 })
+            .send()
+            .await
+            .map_err(|e| format!("Request failed: {}", e))?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(format!("OCR server error: {}", error_text));
+        }
+
+        let data: NumberResponse = response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+        Ok(data.value)
+    }
+
     /// Parse level from OCR text
     fn parse_level(text: &str) -> Result<u32, String> {
         // Strip all non-digits
@@ -283,30 +315,6 @@ impl HttpOcrClient {
             .map_err(|e| format!("Failed to parse percentage: {}", e))?;
 
         Ok((absolute, percentage))
-    }
-
-    /// Parse HP potion count from OCR text (extract digits only)
-    fn parse_hp_potion_count(text: &str) -> Result<u32, String> {
-        let digits: String = text.chars().filter(|c| c.is_ascii_digit()).collect();
-
-        if digits.is_empty() {
-            return Err(format!("No digits found in HP potion count text: '{}'", text));
-        }
-
-        digits.parse::<u32>()
-            .map_err(|e| format!("Failed to parse HP potion count '{}': {}", digits, e))
-    }
-
-    /// Parse MP potion count from OCR text (extract digits only)
-    fn parse_mp_potion_count(text: &str) -> Result<u32, String> {
-        let digits: String = text.chars().filter(|c| c.is_ascii_digit()).collect();
-
-        if digits.is_empty() {
-            return Err(format!("No digits found in MP potion count text: '{}'", text));
-        }
-
-        digits.parse::<u32>()
-            .map_err(|e| format!("Failed to parse MP potion count '{}': {}", digits, e))
     }
 
     /// Recognize level from image using template matching (with RapidOCR fallback)
@@ -358,13 +366,11 @@ impl HttpOcrClient {
 
     /// Recognize HP potion count from image
     pub async fn recognize_hp_potion_count(&self, image: &DynamicImage) -> Result<u32, String> {
-        let text = self.recognize_text(image).await?;
-        Self::parse_hp_potion_count(&text)
+        self.recognize_number(image).await
     }
 
     /// Recognize MP potion count from image
     pub async fn recognize_mp_potion_count(&self, image: &DynamicImage) -> Result<u32, String> {
-        let text = self.recognize_text(image).await?;
-        Self::parse_mp_potion_count(&text)
+        self.recognize_number(image).await
     }
 }
