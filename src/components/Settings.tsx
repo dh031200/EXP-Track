@@ -1,8 +1,21 @@
+import React, { useEffect, useState } from 'react';
 import { useSettingsStore } from '../stores/settingsStore';
+import { loadAppConfig, saveAppConfig, AppConfig } from '../lib/configCommands';
 import './Settings.css';
 
 export function Settings() {
-  const { backgroundOpacity, targetDuration, setBackgroundOpacity, setTargetDuration, resetSettings } = useSettingsStore();
+  const { backgroundOpacity, targetDuration, setBackgroundOpacity, setTargetDuration } = useSettingsStore();
+  const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
+  const [scanInterval, setScanInterval] = useState(1);
+
+  useEffect(() => {
+    loadAppConfig().then(config => {
+      setAppConfig(config);
+      setScanInterval(config.tracking.update_interval);
+    }).catch(err => {
+      console.error('Failed to load config:', err);
+    });
+  }, []);
 
   const handleOpacityChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setBackgroundOpacity(parseFloat(e.target.value));
@@ -10,6 +23,22 @@ export function Settings() {
 
   const handleDurationChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setTargetDuration(parseInt(e.target.value));
+  };
+
+  const handleIntervalChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = parseInt(e.target.value);
+    setScanInterval(val);
+    if (appConfig) {
+      const newConfig = { 
+        ...appConfig, 
+        tracking: { 
+          ...appConfig.tracking, 
+          update_interval: val 
+        } 
+      };
+      setAppConfig(newConfig);
+      await saveAppConfig(newConfig);
+    }
   };
 
   const opacityPercent = Math.round(backgroundOpacity * 100);
@@ -44,6 +73,32 @@ export function Settings() {
       </div>
 
       <div className="settings-section">
+        <h3>인식 설정</h3>
+        <div className="settings-item">
+          <label htmlFor="interval-slider" className="settings-label">
+            인식 주기: <strong>{scanInterval}초</strong>
+          </label>
+          <div className="slider-container">
+            <span className="slider-label">1초</span>
+            <input
+              id="interval-slider"
+              type="range"
+              min="1"
+              max="10"
+              step="1"
+              value={scanInterval}
+              onChange={handleIntervalChange}
+              className="opacity-slider" // Reusing style
+            />
+            <span className="slider-label">10초</span>
+          </div>
+          <p className="settings-help">
+            경험치와 레벨을 인식하는 주기를 설정합니다. (기본값: 1초)
+          </p>
+        </div>
+      </div>
+
+      <div className="settings-section">
         <h3>타이머</h3>
 
         <div className="settings-item">
@@ -70,12 +125,6 @@ export function Settings() {
           </p>
         </div>
       </div>
-
-      {/* <div className="settings-actions">
-        <button onClick={resetSettings} className="reset-button">
-          기본값으로 재설정
-        </button>
-      </div> */}
     </div>
   );
 }
