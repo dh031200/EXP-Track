@@ -46,17 +46,12 @@ impl MpPotionCalculator {
 
                 if used > MAX_USAGE_PER_UPDATE {
                     // OCR error - reject
-                    #[cfg(debug_assertions)]
-                    println!("💊 [MP Calculator] ⚠️ OCR ERROR: {} -> {} (-{}) exceeds threshold ({})",
-                        last, current_count, used, MAX_USAGE_PER_UPDATE);
+                    println!("💊 [MP] OCR ERROR: {} -> {} (-{})", last, current_count, used);
                 } else {
                     // Normal usage
                     self.total_used += used;
                     self.last_count = Some(current_count);
-
-                    #[cfg(debug_assertions)]
-                    println!("💊 [MP Calculator] Used: {} -> {} (-{}), total: {}",
-                        last, current_count, used, self.total_used);
+                    println!("💊 [MP] Used: {} -> {} (-{}), total: {}", last, current_count, used, self.total_used);
                 }
             } else if current_count > last {
                 // Potion count increased - validate 5 times
@@ -66,41 +61,27 @@ impl MpPotionCalculator {
                             // Verified - accept increase
                             self.last_count = Some(current_count);
                             self.pending_increase = None;
-
-                            #[cfg(debug_assertions)]
-                            println!("💊 [MP Calculator] ✅ Increase verified: {} -> {} (+{})",
-                                last, current_count, current_count - last);
+                            println!("💊 [MP] ✅ Increase verified: +{}", current_count - last);
                         } else {
                             // Continue verification
                             self.pending_increase = Some((current_count, count + 1));
-
-                            #[cfg(debug_assertions)]
-                            println!("💊 [MP Calculator] 🔍 Verifying increase: {}/{}", count + 1, 5);
                         }
                     }
                     _ => {
                         // New increase - start verification
                         self.pending_increase = Some((current_count, 1));
-
-                        #[cfg(debug_assertions)]
-                        println!("💊 [MP Calculator] 🔍 New increase detected: {} -> {}, verifying...",
-                            last, current_count);
+                        println!("💊 [MP] 🔍 Increase detected: {} -> {}, verifying...", last, current_count);
                     }
                 }
             } else if let Some((_, _)) = self.pending_increase {
                 // Value reverted during verification
                 self.pending_increase = None;
-
-                #[cfg(debug_assertions)]
-                println!("💊 [MP Calculator] 🚫 Increase cancelled (value reverted)");
             }
         } else {
             // First reading
             self.last_count = Some(current_count);
             self.start_time.get_or_insert_with(Instant::now);
-
-            #[cfg(debug_assertions)]
-            println!("💊 [MP Calculator] Started tracking: {}", current_count);
+            println!("💊 [MP] Started tracking: {}", current_count);
         }
 
         // Calculate per-minute rate

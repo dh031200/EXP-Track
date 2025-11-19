@@ -31,9 +31,7 @@ impl ExpCalculator {
 
     /// Start tracking with initial data
     pub fn start(&mut self, data: ExpData) {
-        #[cfg(debug_assertions)]
-        println!("🦀 [Calculator] Session started: level={}, exp={}, percentage={}", data.level, data.exp, data.percentage);
-        self.start_level = data.level;  // Save original starting level
+        self.start_level = data.level;
         self.initial_data = Some(data.clone());
         self.last_data = Some(data);
         self.start_time = Some(Instant::now());
@@ -44,9 +42,6 @@ impl ExpCalculator {
 
     /// Update with new data and calculate statistics
     pub fn update(&mut self, data: ExpData) -> Result<ExpStats, String> {
-        #[cfg(debug_assertions)]
-        println!("🦀 [Calculator] update() called: level={}, exp={}, percentage={}", data.level, data.exp, data.percentage);
-
         let initial = self
             .initial_data
             .as_ref()
@@ -54,12 +49,6 @@ impl ExpCalculator {
 
         // Clone last_data early to avoid borrow conflicts
         let last = self.last_data.as_ref().ok_or("No previous data")?.clone();
-
-        #[cfg(debug_assertions)]
-        {
-            println!("🦀 [Calculator] initial_data: level={}, exp={}, percentage={}", initial.level, initial.exp, initial.percentage);
-            println!("🦀 [Calculator] last_data: level={}, exp={}, percentage={}", last.level, last.exp, last.percentage);
-        }
 
         // Detect OCR errors: if exp change is unrealistic (>10x or <0.1x from last reading)
         // This handles cases where OCR misreads digits (e.g., bracket '[' becomes '1')
@@ -85,14 +74,6 @@ impl ExpCalculator {
                         // Detect both explosions (ratio > 10) and significant drops (ratio < 0.1)
                         // Also check for impossibly high gains in short time (e.g. > 200% gain in 1 second is suspicious unless low levels)
                         if ratio > 10.0 || ratio < 0.1 {
-                            #[cfg(debug_assertions)]
-                            {
-                                println!("🦀 [Calculator] 🔍 OCR Check: ratio={:.2}x (expected: 0.1x - 10.0x)", ratio);
-                                println!("🦀 [Calculator] ⚠️ OCR ERROR DETECTED: last_exp={}, current_exp={} (ratio={:.2}x)",
-                                        last.exp, data.exp, ratio);
-                                println!("🦀 [Calculator] 🚫 Rejecting this reading - keeping previous value");
-                            }
-
                             // Don't update last_data - keep the good value
                             // Return stats based on last good data
                             return self.update(last.clone());
@@ -107,8 +88,6 @@ impl ExpCalculator {
 
         // Handle level up
         if data.level > last.level {
-            #[cfg(debug_assertions)]
-            println!("🦀 [Calculator] ✨ Level Up Detected: {} -> {}", last.level, data.level);
 
             let max_exp_result = self.level_table.get_exp_for_level(last.level);
             
@@ -159,12 +138,6 @@ impl ExpCalculator {
         let percentage_diff = data.percentage - initial.percentage;
         let total_percentage = percentage_diff + self.completed_levels_percentage;
 
-        #[cfg(debug_assertions)]
-        {
-            println!("🦀 [Calculator] Calculation: data.exp={} - initial.exp={} = exp_diff={}", data.exp, initial.exp, exp_diff);
-            println!("🦀 [Calculator] Calculation: total_exp = {} + {} = {}", exp_diff, self.completed_levels_exp, total_exp);
-            println!("🦀 [Calculator] Calculation: percentage_diff={}, total_percentage={}", percentage_diff, total_percentage);
-        }
         let total_meso = data
             .meso
             .unwrap_or(0)

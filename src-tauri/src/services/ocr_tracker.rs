@@ -136,11 +136,8 @@ impl TrackerState {
             };
 
             if !self.session_started {
-                // Start session
                 self.exp_calculator.start(data);
                 self.session_started = true;
-                #[cfg(debug_assertions)]
-                println!("✅ Tracking session started: level={}, exp={}, percentage={}", level, exp, percentage);
             } else {
                 // Update session with EXP tracking - ORIGINAL WORKING MECHANISM
                 let result = self.exp_calculator.update(data);
@@ -156,8 +153,6 @@ impl TrackerState {
                         self.error = None;
                     }
                     Err(e) => {
-                        #[cfg(debug_assertions)]
-                        eprintln!("❌ ExpCalculator error: {}", e);
                         self.error = Some(e);
                     }
                 }
@@ -242,37 +237,30 @@ impl OcrTracker {
         exp_roi: Roi,
     ) -> Result<(), String> {
         // Check if already tracking - prevent reinitialization
-        let state = self.state.lock().await;
+        let mut state = self.state.lock().await;
         if state.is_tracking {
-            #[cfg(debug_assertions)]
-            println!("⚠️  Already tracking, ignoring restart request");
             return Ok(());
         }
-        drop(state);
 
-        #[cfg(debug_assertions)]
-        println!("📋 Starting tracking with ROIs:");
-        #[cfg(debug_assertions)]
-        println!("   Level ROI: ({}, {}) {}x{}", level_roi.x, level_roi.y, level_roi.width, level_roi.height);
-        #[cfg(debug_assertions)]
-        println!("   EXP ROI: ({}, {}) {}x{}", exp_roi.x, exp_roi.y, exp_roi.width, exp_roi.height);
+        // Check if this is a resume (session_started = true) or new session
+        let is_resume = state.session_started;
+
+        if !is_resume {
+            // New session - reset state completely
+            *state = TrackerState::new()?;
+        }
+
+        // Set tracking flag
+        state.is_tracking = true;
+        drop(state);
 
         // Reset stop signal
         *self.stop_signal.lock().await = false;
-
-        // Reset state (only if not tracking)
-        let mut state = self.state.lock().await;
-        *state = TrackerState::new()?;
-        state.is_tracking = true;
-        drop(state);
 
         // Spawn OCR tasks: combined Level+Inventory (shared capture), separate EXP, health check
         self.spawn_combined_level_inventory_loop(level_roi, self.app.clone());
         self.spawn_exp_loop(exp_roi, self.app.clone());
         self.spawn_health_check_loop(self.app.clone());
-
-        #[cfg(debug_assertions)]
-        println!("🚀 OCR Tracker started with 3 OCR tasks (Level, EXP, Inventory) + health monitor");
         Ok(())
     }
 
@@ -281,8 +269,6 @@ impl OcrTracker {
         *self.stop_signal.lock().await = true;
         let mut state = self.state.lock().await;
         state.is_tracking = false;
-        #[cfg(debug_assertions)]
-        println!("⏹️  OCR Tracker stopped");
     }
 
     /// Get current tracking statistics
@@ -296,8 +282,6 @@ impl OcrTracker {
         *self.stop_signal.lock().await = true;
         let mut state = self.state.lock().await;
         *state = TrackerState::new()?;
-        #[cfg(debug_assertions)]
-        println!("🔄 OCR Tracker reset");
         Ok(())
     }
 
@@ -309,9 +293,6 @@ impl OcrTracker {
         let ocr_service = Arc::clone(&self.ocr_service);
 
         tokio::spawn(async move {
-            #[cfg(debug_assertions)]
-            println!("🚀 Combined LEVEL + INVENTORY OCR task started (shared capture with ROI memoization)");
-
             // Image cache for duplicate detection
             let mut last_image_bytes: Option<Vec<u8>> = None;
 
@@ -331,8 +312,6 @@ impl OcrTracker {
                         // Check if image is identical to last capture
                         if let Some(ref last_bytes) = last_image_bytes {
                             if current_bytes == *last_bytes {
-                                #[cfg(debug_assertions)]
-                                println!("⏭️  Level+Inventory: Skipped (identical image)");
                                 sleep(Duration::from_millis(500)).await;
                                 continue;
                             }
@@ -351,62 +330,34 @@ impl OcrTracker {
                             let image = Arc::clone(&image);
                             let app = app.clone();
                             let state = Arc::clone(&state);
-                            let start = start.clone();
                             let memoized_roi = memoized_level_roi.clone();
 
                             let updated_roi = tokio::spawn(async move {
-                                let level_result = tokio::task::spawn_blocking(move || {
-                                    // Try memoized ROI first (fast path)
-                                    if let Some((left, top, right, bottom)) = memoized_roi {
-                                        #[cfg(debug_assertions)]
-                                        println!("🎯 Using memoized Level ROI: ({}, {}, {}, {})", left, top, right, bottom);
+                                // Try memoized ROI first (fast path)
+                                if let Some((left, top, right, bottom)) = memoized_roi {
+                                    let width = right - left + 1;
+                                    let height = bottom - top + 1;
+                                    let cropped = image.crop_imm(left, top, width, height);
 
-                                        // Crop to memoized region
-                                        let width = right - left + 1;
-                                        let height = bottom - top + 1;
-                                        let cropped = image.crop_imm(left, top, width, height);
-
-                                        // Try recognition on cropped region
-                                        if let Ok(result) = tokio::runtime::Handle::current().block_on(
-                                            http_client.recognize_level(&cropped)
-                                        ) {
-                                            #[cfg(debug_assertions)]
-                                            println!("✅ Level OCR succeeded with memoized ROI");
-                                            return Ok((result, Some((left, top, right, bottom))));
-                                        }
-
-                                        #[cfg(debug_assertions)]
-                                        println!("⚠️  Memoized ROI failed, falling back to full detection");
+                                    if let Ok(result) = http_client.recognize_level(&cropped).await {
+                                        return (Ok(result), Some((left, top, right, bottom)));
                                     }
+                                }
 
-                                    // Fallback: Full detection (slow path)
-                                    #[cfg(debug_assertions)]
-                                    println!("🔍 Performing full Level detection");
-
-                                    let result = tokio::runtime::Handle::current().block_on(
-                                        http_client.recognize_level(&*image)
-                                    )?;
-
-                                    // Try to detect ROI for memoization
-                                    let roi = http_client.detect_level_roi(&*image).ok();
-                                    if let Some(coords) = roi {
-                                        #[cfg(debug_assertions)]
-                                        println!("💾 Memoizing Level ROI: {:?}", coords);
+                                // Fallback: Full detection
+                                match http_client.recognize_level(&*image).await {
+                                    Ok(result) => {
+                                        // Try to detect ROI for memoization
+                                        let roi = http_client.detect_level_roi(&*image).ok();
+                                        (Ok(result), roi)
                                     }
-
-                                    Ok((result, roi))
-                                }).await;
-
-                                match level_result {
-                                    Ok(Ok((result, roi))) => (Ok(result), roi),
-                                    Ok(Err(e)) => (Err(e), None),
-                                    Err(e) => (Err(format!("Task failed: {}", e)), None)
+                                    Err(e) => (Err(e), None)
                                 }
                             }).await;
 
                             let (level_result, new_roi) = match updated_roi {
-                                Ok(result) => result,
-                                Err(e) => (Err(format!("Spawn failed: {}", e)), None)
+                                Ok((result, roi)) => (result, roi),
+                                Err(e) => (Err(format!("Task failed: {}", e)), None)
                             };
 
                             // Update memoized ROI if we got a new one
@@ -416,32 +367,21 @@ impl OcrTracker {
 
                             match level_result {
                                 Ok(result) => {
+                                    println!("📊 [LEVEL] {} (text: '{}')", result.level, result.raw_text);
+                                    
                                     let should_emit = {
                                         let mut state = state.lock().await;
                                         state.update_level(result.level)
                                     };
 
-                                    // Emit event to Frontend if level changed
                                     if should_emit {
-                                        #[cfg(debug_assertions)]
-                                        println!("📤 Emitting level update event: {}", result.level);
                                         if let Err(e) = app.emit("ocr:level-update", LevelUpdate { level: result.level }) {
-                                            eprintln!("❌ Failed to emit level update event: {}", e);
+                                            eprintln!("Failed to emit level update: {}", e);
                                         }
-                                    } else {
-                                        #[cfg(debug_assertions)]
-                                        println!("⏭️  Level {} unchanged, skipping emit", result.level);
-                                    }
-
-                                    #[cfg(debug_assertions)]
-                                    {
-                                        let elapsed = start.elapsed().as_millis();
-                                        println!("✅ LEVEL OCR: {} ({}ms)", result.level, elapsed);
                                     }
                                 }
-                                Err(e) => {
-                                    #[cfg(debug_assertions)]
-                                    eprintln!("❌ LEVEL OCR failed: {}", e);
+                                Err(_e) => {
+                                    // Level OCR failed, will retry on next cycle
                                 }
                             }
                         }
@@ -452,7 +392,6 @@ impl OcrTracker {
                             let image = Arc::clone(&image);
                             let app = app.clone();
                             let state = Arc::clone(&state);
-                            let start = start.clone();
                             let memoized_roi = memoized_inventory_roi.clone();
 
                             let updated_roi = tokio::spawn(async move {
@@ -461,81 +400,29 @@ impl OcrTracker {
 
                                     // Try memoized ROI first (fast path)
                                     if let Some((left, top, right, bottom)) = memoized_roi {
-                                        #[cfg(debug_assertions)]
-                                        {
-                                            let t0 = std::time::Instant::now();
-                                            println!("🎯 Using memoized Inventory ROI: ({}, {}, {}, {})", left, top, right, bottom);
+                                        let padding = 100;
+                                        let img_width = image.width();
+                                        let img_height = image.height();
+                                        let padded_left = left.saturating_sub(padding);
+                                        let padded_top = top.saturating_sub(padding);
+                                        let padded_right = (right + padding).min(img_width - 1);
+                                        let padded_bottom = (bottom + padding).min(img_height - 1);
 
-                                            // Add padding to handle slight position changes (100px on each side)
-                                            let padding = 100;
-                                            let img_width = image.width();
-                                            let img_height = image.height();
-                                            let padded_left = left.saturating_sub(padding);
-                                            let padded_top = top.saturating_sub(padding);
-                                            let padded_right = (right + padding).min(img_width - 1);
-                                            let padded_bottom = (bottom + padding).min(img_height - 1);
+                                        let crop_width = padded_right - padded_left + 1;
+                                        let crop_height = padded_bottom - padded_top + 1;
+                                        let cropped = image.crop_imm(padded_left, padded_top, crop_width, crop_height);
 
-                                            let t1 = std::time::Instant::now();
-                                            println!("  ⏱️  ROI calculation: {}ms", (t1 - t0).as_millis());
-
-                                            // Crop to padded region
-                                            let crop_width = padded_right - padded_left + 1;
-                                            let crop_height = padded_bottom - padded_top + 1;
-                                            println!("  📐 Cropping {}x{} → {}x{}", img_width, img_height, crop_width, crop_height);
-                                            let cropped = image.crop_imm(padded_left, padded_top, crop_width, crop_height);
-
-                                            let t2 = std::time::Instant::now();
-                                            println!("  ⏱️  Crop time: {}ms", (t2 - t1).as_millis());
-
-                                            // Try recognition on cropped region using full pipeline
-                                            println!("  🔄 Calling recognize_inventory on cropped region...");
-                                            let recognition_result = service.recognize_inventory(&cropped);
-
-                                            let t3 = std::time::Instant::now();
-                                            println!("  ⏱️  recognize_inventory time: {}ms", (t3 - t2).as_millis());
-
-                                            if let Ok(results) = recognition_result {
-                                                println!("✅ Inventory OCR succeeded with memoized ROI (total: {}ms)", (t3 - t0).as_millis());
-                                                return Ok((results, Some((left, top, right, bottom))));
-                                            }
-
-                                            println!("⚠️  Memoized ROI failed, falling back to full detection");
-                                        }
-
-                                        #[cfg(not(debug_assertions))]
-                                        {
-                                            // Non-debug version without timing
-                                            let padding = 100;
-                                            let img_width = image.width();
-                                            let img_height = image.height();
-                                            let padded_left = left.saturating_sub(padding);
-                                            let padded_top = top.saturating_sub(padding);
-                                            let padded_right = (right + padding).min(img_width - 1);
-                                            let padded_bottom = (bottom + padding).min(img_height - 1);
-
-                                            let crop_width = padded_right - padded_left + 1;
-                                            let crop_height = padded_bottom - padded_top + 1;
-                                            let cropped = image.crop_imm(padded_left, padded_top, crop_width, crop_height);
-
-                                            if let Ok(results) = service.recognize_inventory(&cropped) {
-                                                return Ok((results, Some((left, top, right, bottom))));
-                                            }
+                                        if let Ok(results) = service.recognize_inventory(&cropped) {
+                                            return Ok((results, Some((left, top, right, bottom))));
                                         }
                                     }
 
-                                    // Fallback: Full detection (slow path)
-                                    #[cfg(debug_assertions)]
-                                    println!("🔍 Performing full Inventory region detection");
-
+                                    // Fallback: Full detection
                                     match service.recognize_inventory(&*image) {
                                         Ok(results) => {
                                             // Try to get ROI coordinates for memoization
                                             if let Some(matcher) = &service.inventory_matcher {
                                                 if let Ok((_, coords)) = matcher.detect_inventory_region_with_coords(&*image) {
-                                                    #[cfg(debug_assertions)]
-                                                    println!("💾 Memoizing Inventory ROI: {:?}", coords);
-                                                    
-                                                    // Save original inventory preview image (not processed)
                                                     let (left, top, right, bottom) = coords;
                                                     let width = right - left + 1;
                                                     let height = bottom - top + 1;
@@ -571,67 +458,48 @@ impl OcrTracker {
 
                             match inventory_result {
                                 Ok(inventory) => {
-                                        // Load potion config from app state
-                                        let potion_config = {
-                                            if let Some(config_state) = app.try_state::<std::sync::Mutex<ConfigManager>>() {
-                                                match config_state.lock() {
-                                                    Ok(manager) => match manager.load() {
-                                                        Ok(config) => config.potion,
-                                                        Err(_) => PotionConfig::default()
-                                                    },
+                                    let potion_config = {
+                                        if let Some(config_state) = app.try_state::<std::sync::Mutex<ConfigManager>>() {
+                                            match config_state.lock() {
+                                                Ok(manager) => match manager.load() {
+                                                    Ok(config) => config.potion,
                                                     Err(_) => PotionConfig::default()
-                                                }
-                                            } else {
-                                                PotionConfig::default()
+                                                },
+                                                Err(_) => PotionConfig::default()
                                             }
-                                        };
-
-                                        // Extract HP and MP counts from inventory
-                                        let hp_potion_count = *inventory.get(&potion_config.hp_potion_slot).unwrap_or(&0);
-                                        let mp_potion_count = *inventory.get(&potion_config.mp_potion_slot).unwrap_or(&0);
-
-                                        // Update state and calculators
-                                        let mut state = state.lock().await;
-                                        state.hp_potion_count = Some(hp_potion_count);
-                                        state.mp_potion_count = Some(mp_potion_count);
-
-                                        // Update HP calculator
-                                        let (hp_used, hp_per_min) = state.hp_calculator.update(hp_potion_count);
-                                        state.latest_stats.hp_potions_used = hp_used as i32;
-                                        state.latest_stats.hp_potions_per_minute = hp_per_min;
-
-                                        // Update MP calculator
-                                        let (mp_used, mp_per_min) = state.mp_calculator.update(mp_potion_count);
-                                        state.latest_stats.mp_potions_used = mp_used as i32;
-                                        state.latest_stats.mp_potions_per_minute = mp_per_min;
-
-                                        drop(state);
-
-                                        // Emit events to Frontend
-                                        #[cfg(debug_assertions)]
-                                        println!("📤 Emitting HP potion update event: {}", hp_potion_count);
-                                        if let Err(e) = app.emit("ocr:hp-potion-update", HpPotionUpdate { hp_potion_count }) {
-                                            eprintln!("❌ Failed to emit HP potion update event: {}", e);
+                                        } else {
+                                            PotionConfig::default()
                                         }
+                                    };
 
-                                        #[cfg(debug_assertions)]
-                                        println!("📤 Emitting MP potion update event: {}", mp_potion_count);
-                                        if let Err(e) = app.emit("ocr:mp-potion-update", MpPotionUpdate { mp_potion_count }) {
-                                            eprintln!("❌ Failed to emit MP potion update event: {}", e);
-                                        }
+                                    let hp_potion_count = *inventory.get(&potion_config.hp_potion_slot).unwrap_or(&0);
+                                    let mp_potion_count = *inventory.get(&potion_config.mp_potion_slot).unwrap_or(&0);
 
-                                        #[cfg(debug_assertions)]
-                                        {
-                                            let elapsed = start.elapsed().as_millis();
-                                            println!("✅ Inventory OCR: HP={} ({}), MP={} ({}) - {}ms",
-                                                hp_potion_count, potion_config.hp_potion_slot,
-                                                mp_potion_count, potion_config.mp_potion_slot,
-                                                elapsed);
-                                        }
+                                    let mut state = state.lock().await;
+                                    state.hp_potion_count = Some(hp_potion_count);
+                                    state.mp_potion_count = Some(mp_potion_count);
+
+                                    let (hp_used, hp_per_min) = state.hp_calculator.update(hp_potion_count);
+                                    state.latest_stats.hp_potions_used = hp_used as i32;
+                                    state.latest_stats.hp_potions_per_minute = hp_per_min;
+
+                                    let (mp_used, mp_per_min) = state.mp_calculator.update(mp_potion_count);
+                                    state.latest_stats.mp_potions_used = mp_used as i32;
+                                    state.latest_stats.mp_potions_per_minute = mp_per_min;
+
+                                    drop(state);
+
+                                    // Emit events to Frontend
+                                    if let Err(e) = app.emit("ocr:hp-potion-update", HpPotionUpdate { hp_potion_count }) {
+                                        eprintln!("Failed to emit HP potion update: {}", e);
+                                    }
+
+                                    if let Err(e) = app.emit("ocr:mp-potion-update", MpPotionUpdate { mp_potion_count }) {
+                                        eprintln!("Failed to emit MP potion update: {}", e);
+                                    }
                                 }
-                                Err(e) => {
-                                    #[cfg(debug_assertions)]
-                                    eprintln!("❌ Inventory OCR failed: {}", e);
+                                Err(_e) => {
+                                    // Inventory OCR failed, will retry on next cycle
                                 }
                             }
                         }
@@ -639,9 +507,8 @@ impl OcrTracker {
                         // Update cache
                         last_image_bytes = Some(current_bytes);
                     }
-                    Err(e) => {
-                        #[cfg(debug_assertions)]
-                        eprintln!("❌ Full screen capture failed: {}", e);
+                    Err(_e) => {
+                        // Full screen capture failed, will retry on next cycle
                     }
                 }
 
@@ -661,9 +528,6 @@ impl OcrTracker {
                 };
                 sleep(Duration::from_millis(interval_ms)).await;
             }
-
-            #[cfg(debug_assertions)]
-            println!("⏹️  Combined Level+Inventory OCR task stopped");
         });
     }
 
@@ -754,30 +618,17 @@ impl OcrTracker {
         let ocr_service = Arc::clone(&self.ocr_service);  // Use shared service
 
         tokio::spawn(async move {
-            #[cfg(debug_assertions)]
-            println!("🚀 EXP OCR task started - using shared OCR service");
-
             // Image cache for duplicate detection
             let mut last_image_bytes: Option<Vec<u8>> = None;
 
             while !*stop_signal.lock().await {
-                let start = std::time::Instant::now();
-
                 match screen_capture.capture_region(&roi) {
                     Ok(image) => {
-                        #[cfg(debug_assertions)]
-                        println!("📸 EXP capture: ROI({},{},{}x{}), Image({}x{})", 
-                            roi.x, roi.y, roi.width, roi.height, 
-                            image.width(), image.height());
-                        
-                        // Convert image to raw bytes for comparison
                         let current_bytes = image.as_bytes().to_vec();
 
                         // Check if image is identical to last capture
                         if let Some(ref last_bytes) = last_image_bytes {
                             if current_bytes == *last_bytes {
-                                #[cfg(debug_assertions)]
-                                println!("⏭️  EXP: Skipped (identical image)");
                                 sleep(Duration::from_millis(500)).await;
                                 continue;
                             }
@@ -789,11 +640,11 @@ impl OcrTracker {
                             service.http_client.clone()
                         };
                         
-                        #[cfg(debug_assertions)]
-                        println!("🔍 Sending EXP image to OCR server...");
-                        
                         match http_client.recognize_exp(&image).await {
                             Ok(result) => {
+                                println!("📊 [EXP] {} [{:.2}%] (text: '{}')", 
+                                    result.absolute, result.percentage, result.raw_text);
+                                
                                 let should_emit = {
                                     let mut state_guard = state.lock().await;
                                     state_guard.update_exp_data(result.absolute, result.percentage)
@@ -801,40 +652,24 @@ impl OcrTracker {
 
                                 // Emit event to Frontend if EXP changed
                                 if should_emit {
-                                    #[cfg(debug_assertions)]
-                                    println!("📤 Emitting EXP update event: {} [{}%]", result.absolute, result.percentage);
                                     if let Err(e) = app.emit("ocr:exp-update", ExpUpdate {
                                         exp: result.absolute,
                                         percentage: result.percentage
                                     }) {
-                                        eprintln!("❌ Failed to emit EXP update event: {}", e);
+                                        eprintln!("Failed to emit EXP update: {}", e);
                                     }
-                                } else {
-                                    #[cfg(debug_assertions)]
-                                    println!("⏭️  EXP unchanged, skipping emit");
-                                }
-
-                                #[cfg(debug_assertions)]
-                                {
-                                    let elapsed = start.elapsed().as_millis();
-                                    println!(
-                                        "✅ EXP OCR: {} [{}%] ({}ms)",
-                                        result.absolute, result.percentage, elapsed
-                                    );
                                 }
                             }
-                            Err(e) => {
-                                #[cfg(debug_assertions)]
-                                eprintln!("❌ EXP OCR failed: {}", e);
+                            Err(_e) => {
+                                // EXP OCR failed, will retry on next cycle
                             }
                         }
 
                         // Update cache
                         last_image_bytes = Some(current_bytes);
                     }
-                    Err(e) => {
-                        #[cfg(debug_assertions)]
-                        eprintln!("❌ EXP capture failed: {}", e);
+                    Err(_e) => {
+                        // EXP capture failed, will retry on next cycle
                     }
                 }
 
@@ -854,9 +689,6 @@ impl OcrTracker {
                 };
                 sleep(Duration::from_millis(interval_ms)).await;
             }
-
-            #[cfg(debug_assertions)]
-            println!("⏹️  EXP OCR task stopped");
         });
     }
 
@@ -868,15 +700,10 @@ impl OcrTracker {
         let ocr_service = Arc::clone(&self.ocr_service);
 
         tokio::spawn(async move {
-            #[cfg(debug_assertions)]
-            println!("🚀 Inventory OCR task started - Rust native with auto ROI");
-
             // Image cache for duplicate detection
             let mut last_image_bytes: Option<Vec<u8>> = None;
 
             while !*stop_signal.lock().await {
-                let start = std::time::Instant::now();
-
                 // Capture full screen for automatic inventory detection
                 match screen_capture.capture_full() {
                     Ok(image) => {
@@ -886,8 +713,6 @@ impl OcrTracker {
                         // Check if image is identical to last capture
                         if let Some(ref last_bytes) = last_image_bytes {
                             if current_bytes == *last_bytes {
-                                #[cfg(debug_assertions)]
-                                println!("⏭️  Inventory: Skipped (identical image)");
                                 sleep(Duration::from_millis(500)).await;
                                 continue;
                             }
@@ -945,36 +770,22 @@ impl OcrTracker {
                                 // Emit events to Frontend
                                 app.emit("ocr:hp-potion-update", HpPotionUpdate { hp_potion_count }).ok();
                                 app.emit("ocr:mp-potion-update", MpPotionUpdate { mp_potion_count }).ok();
-
-                                #[cfg(debug_assertions)]
-                                {
-                                    let elapsed = start.elapsed().as_millis();
-                                    println!("✅ Inventory OCR: HP={} ({}), MP={} ({}) - {}ms",
-                                        hp_potion_count, potion_config.hp_potion_slot,
-                                        mp_potion_count, potion_config.mp_potion_slot,
-                                        elapsed);
-                                }
                             }
-                            Err(e) => {
-                                #[cfg(debug_assertions)]
-                                eprintln!("❌ Inventory OCR failed: {}", e);
+                            Err(_e) => {
+                                // Inventory OCR failed, will retry on next cycle
                             }
                         }
 
                         // Update cache
                         last_image_bytes = Some(current_bytes);
                     }
-                    Err(e) => {
-                        #[cfg(debug_assertions)]
-                        eprintln!("❌ Full screen capture failed: {}", e);
+                    Err(_e) => {
+                        // Full screen capture failed, will retry on next cycle
                     }
                 }
 
                 sleep(Duration::from_millis(500)).await;
             }
-
-            #[cfg(debug_assertions)]
-            println!("⏹️  Inventory OCR task stopped");
         });
     }
 
@@ -986,9 +797,6 @@ impl OcrTracker {
         let ocr_service = Arc::clone(&self.ocr_service);  // Use shared service
 
         tokio::spawn(async move {
-            #[cfg(debug_assertions)]
-            println!("🏥 Health check loop started - using shared OCR service");
-
             while !*stop_signal.lock().await {
                 // Use shared OCR service for health check
                 let http_client = {
@@ -996,21 +804,13 @@ impl OcrTracker {
                     service.http_client.clone()
                 };
                 match http_client.health_check().await {
-                            Ok(_) => {
+                    Ok(_) => {
                         let mut state = state.lock().await;
-                        if !state.ocr_server_healthy {
-                            #[cfg(debug_assertions)]
-                            println!("✅ OCR server is now healthy");
-                        }
                         state.ocr_server_healthy = true;
                         state.latest_stats.ocr_server_healthy = true;
                     }
-                    Err(e) => {
+                    Err(_e) => {
                         let mut state = state.lock().await;
-                        if state.ocr_server_healthy {
-                            #[cfg(debug_assertions)]
-                            println!("❌ OCR server health check failed: {}", e);
-                        }
                         state.ocr_server_healthy = false;
                         state.latest_stats.ocr_server_healthy = false;
                     }
@@ -1019,9 +819,6 @@ impl OcrTracker {
                 // Check every 2 seconds
                 sleep(Duration::from_secs(2)).await;
             }
-
-            #[cfg(debug_assertions)]
-            println!("⏹️  Health check loop stopped");
         });
     }
 }

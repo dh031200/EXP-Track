@@ -168,7 +168,7 @@ impl InventoryTemplateMatcher {
             &cropped_gray,
             522,
             255,
-            image::imageops::FilterType::Nearest,  // Changed from Lanczos3 to Nearest
+            image::imageops::FilterType::Nearest,
         );
 
         // Step 7: Final threshold for OCR (threshold 1, same as Python line 186)
@@ -360,8 +360,6 @@ impl InventoryTemplateMatcher {
         let t_detect = std::time::Instant::now();
 
         if detections.is_empty() {
-            #[cfg(debug_assertions)]
-            println!("      📍 Slot '{}': 0 (empty, took {}ms)", slot, (t_detect - t_start).as_millis());
             return Ok(0); // Empty slot
         }
 
@@ -369,20 +367,18 @@ impl InventoryTemplateMatcher {
         let mut sorted = detections;
         sorted.sort_by_key(|d| d.x);
 
+        // DEBUG: Print each detected digit with its position and score
+        println!("🔍 [{}] Detected {} digits:", slot.to_uppercase(), sorted.len());
+        for (i, d) in sorted.iter().enumerate() {
+            println!("  [{}] digit={}, x={}, score={:.3}, scale={:.2}", i, d.digit, d.x, d.score, d.scale);
+        }
+
         // Concatenate digits to form number
         let number_str: String = sorted.iter().map(|d| d.digit.to_string()).collect();
         let count = number_str.parse::<u32>()
             .map_err(|e| format!("Failed to parse potion count: {}", e))?;
 
-        #[cfg(debug_assertions)]
-        {
-            let t_end = std::time::Instant::now();
-            println!("      📍 Slot '{}': {} (prep: {}ms, detect: {}ms, total: {}ms)",
-                slot, count,
-                (t_prep - t_start).as_millis(),
-                (t_detect - t_prep).as_millis(),
-                (t_end - t_start).as_millis());
-        }
+        println!("🔍 [{}] Final result: \"{}\" → {}", slot.to_uppercase(), number_str, count);
 
         Ok(count)
     }
@@ -399,9 +395,6 @@ impl InventoryTemplateMatcher {
             return Err(format!("Invalid inventory size: {}x{} (expected 522x255)", gray.width(), gray.height()));
         }
 
-        #[cfg(debug_assertions)]
-        println!("    🎰 Processing 8 inventory slots...");
-
         let mut results = HashMap::new();
         let slots = vec!["shift", "ins", "home", "pup", "ctrl", "del", "end", "pdn"];
 
@@ -409,12 +402,6 @@ impl InventoryTemplateMatcher {
             // Recognize count in this slot, default to 0 if recognition fails
             let count = self.recognize_count_in_slot(inventory_image, slot).unwrap_or(0);
             results.insert(slot.to_string(), count);
-        }
-
-        #[cfg(debug_assertions)]
-        {
-            let t_end = std::time::Instant::now();
-            println!("    ✅ All slots processed in {}ms", (t_end - t_start).as_millis());
         }
 
         Ok(results)
@@ -439,7 +426,7 @@ impl InventoryTemplateMatcher {
 
         // Multi-scale template matching
         let scales = vec![0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3];
-        let threshold = 0.7;
+        let threshold = 0.65;  // Lowered from 0.7 to catch more digits
 
         // Use rayon for parallel template matching across scales
         use rayon::prelude::*;
@@ -501,17 +488,6 @@ impl InventoryTemplateMatcher {
 
         // Filter by height consistency
         let height_filtered = self.filter_by_height(filtered, 0.2)?;
-
-        #[cfg(debug_assertions)]
-        {
-            let t_height = std::time::Instant::now();
-            println!("        🔍 detect_digits_in_roi breakdown:");
-            println!("           Crop: {}ms", (t_crop - t_start).as_millis());
-            println!("           Parallel matching (10 templates × 8 scales): {}ms", (t_matching_done - t_crop).as_millis());
-            println!("           NMS: {}ms", (t_nms - t_matching_done).as_millis());
-            println!("           Height filter: {}ms", (t_height - t_nms).as_millis());
-            println!("           Total: {}ms", (t_height - t_start).as_millis());
-        }
 
         // Remove duplicates
         let final_detections = self.remove_duplicates(height_filtered, 5)?;
