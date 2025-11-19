@@ -565,7 +565,7 @@ impl OcrTracker {
                                     if let Some(roi) = hp_roi {
                                         let slot_img = inv_img.crop_imm(roi.x, roi.y, roi.width, roi.height);
                                         // Crop bottom 45% for number
-                                        let crop_h = (roi.height as f32 * 0.45) as u32;
+let crop_h = (roi.height as f32 * 0.45) as u32;
                                         let crop_y = roi.height - crop_h;
                                         
                                         let number_part = slot_img.crop_imm(0, crop_y, roi.width, crop_h);
