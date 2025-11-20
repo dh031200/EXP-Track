@@ -112,6 +112,8 @@ a = Analysis(
     datas=[
         # Include entire RapidOCR package with all resources
         ('{rapidocr_path}', 'rapidocr'),
+        # Include custom English recognition model (not in default rapidocr package)
+        ('models/en_PP-OCRv4_rec_infer.onnx', 'rapidocr/models'),
         # Include number-only dictionary for OCR
         ('dict_numbers.txt', '.'),
     ],

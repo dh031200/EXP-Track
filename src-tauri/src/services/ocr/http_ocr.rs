@@ -234,8 +234,18 @@ impl HttpOcrClient {
             .await
             .map_err(|e| format!("Failed to parse response: {}", e))?;
 
+        // Log raw OCR boxes before processing
+        if !data.boxes.is_empty() {
+            let raw_boxes: Vec<String> = data.boxes.iter()
+                .map(|b| format!("'{}'", b.text))
+                .collect();
+            println!("🔍 [OCR] Raw boxes: [{}]", raw_boxes.join(", "));
+        }
+
         // Process boxes: filter overlapping, sort left-to-right, concatenate
         let processed_text = Self::process_ocr_boxes(data.boxes);
+        println!("🔍 [OCR] Processed: '{}'", processed_text);
+        
         Ok(processed_text)
     }
 

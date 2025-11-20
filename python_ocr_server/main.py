@@ -24,17 +24,30 @@ import cv2 # OpenCV for image preprocessing
 if getattr(sys, 'frozen', False):
     # Running as PyInstaller bundle
     base_path = Path(sys._MEIPASS)
+    models_dir = base_path / "rapidocr" / "models"
 else:
-    # Running as script
+    # Running as script (development mode)
     base_path = Path(__file__).parent
-
-models_dir = base_path / "rapidocr" / "models"
-
+    # Use site-packages rapidocr models for Chinese models
+    import rapidocr
+    rapidocr_pkg_path = Path(rapidocr.__file__).parent
+    models_dir = rapidocr_pkg_path / "models"
 
 # Model file paths - Using English model for better number recognition
 det_model_path = models_dir / "ch_PP-OCRv4_det_infer.onnx"
 cls_model_path = models_dir / "ch_ppocr_mobile_v2.0_cls_infer.onnx"
-rec_model_path = models_dir / "en_PP-OCRv4_rec_infer.onnx"  # English model for numbers
+
+# English recognition model - check custom location first (dev mode), then bundled location
+if not getattr(sys, 'frozen', False):
+    # Development mode: use local custom model
+    custom_rec_model = base_path / "models" / "en_PP-OCRv4_rec_infer.onnx"
+    if custom_rec_model.exists():
+        rec_model_path = custom_rec_model
+    else:
+        rec_model_path = models_dir / "en_PP-OCRv4_rec_infer.onnx"
+else:
+    # Production mode: use bundled model in rapidocr/models
+    rec_model_path = models_dir / "en_PP-OCRv4_rec_infer.onnx"
 
 # Character dictionary for numbers only (0-9, [, ], %, .)
 dict_path = base_path / "dict_numbers.txt"
