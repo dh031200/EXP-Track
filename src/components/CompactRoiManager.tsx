@@ -38,9 +38,9 @@ import expExample from '/icons/exp_roi_example.png';
 import potionExample from '/icons/potion_roi_example.png';
 
 const ROI_CONFIGS = [
-  { type: 'level' as RoiType, label: '레벨', icon: lvIcon, color: '#4CAF50', autoDetect: true, example: levelExample },
+  { type: 'level' as RoiType, label: '레벨', icon: lvIcon, color: '#4CAF50', autoDetect: false, example: levelExample },
   { type: 'exp' as RoiType, label: '경험치', icon: expIcon, color: '#2196F3', autoDetect: false, example: expExample },
-  { type: 'inventory' as RoiType, label: '포션', icon: [hpIcon, mpIcon], color: '#FF5722', autoDetect: true, example: potionExample },
+  { type: 'inventory' as RoiType, label: '포션', icon: [hpIcon, mpIcon], color: '#FF5722', autoDetect: false, example: potionExample },
   // { type: 'mapLocation' as RoiType, label: 'Map', icon: '🗺️', color: '#9C27B0' }, // Commented out temporarily
   // { type: 'meso' as RoiType, label: 'Meso', icon: '💰', color: '#FF9800' }, // Commented out temporarily
 ];
@@ -60,9 +60,16 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
 
   useEffect(() => {
     const init = async () => {
-      await initScreenCapture();
-      await loadAllRois();
-      setIsInitialized(true);
+      try {
+        await initScreenCapture();
+        console.log('✅ Screen capture initialized in CompactRoiManager');
+        await loadAllRois();
+        setIsInitialized(true);
+      } catch (error) {
+        console.error('❌ Failed to initialize screen capture:', error);
+        // Set initialized to true anyway so UI can still be used
+        setIsInitialized(true);
+      }
     };
     init();
   }, [loadAllRois]);
@@ -212,47 +219,62 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
     await removeRoi(type);
   };
 
-  const handleAutoDetect = async (type: RoiType) => {
-    setIsAutoDetecting(true);
-    setAutoDetectError(null);
+  const handleResetAllRois = async () => {
+    if (!window.confirm('모든 영역 설정을 초기화하시겠습니까?')) {
+      return;
+    }
     try {
-      console.log(`🔍 Auto-detecting ${type} ROI...`);
-      const result = await autoDetectRois();
-      console.log(`📊 Auto-detect result for ${type}:`, result);
-
-      if (type === 'level' && result.level) {
-        if (result.level_boxes && result.level_boxes.length > 0) {
-          await setLevelWithBoxes(result.level, result.level_boxes);
-          console.log(`✅ Level ROI auto-detected with ${result.level_boxes.length} digit boxes`);
-        } else {
-          await setRoi('level', result.level);
-          console.log('✅ Level ROI auto-detected');
-        }
-        await handleViewPreview('level');
-      } else if (type === 'inventory' && result.inventory) {
-        await setRoi('inventory', result.inventory);
-        console.log('✅ Inventory ROI auto-detected');
-        await handleViewPreview('inventory');
-      } else {
-        const errorMsg = `${type} ROI를 자동으로 찾지 못했습니다. 수동으로 선택해주세요.`;
-        console.warn(`⚠️ ${errorMsg}`);
-        setAutoDetectError(errorMsg);
-        setTimeout(() => {
-          handleManualSelect(type);
-        }, 2000);
-      }
+      await removeRoi('level');
+      await removeRoi('exp');
+      await removeRoi('inventory');
+      console.log('✅ All ROIs reset');
     } catch (err) {
-      const errorMsg = `자동 감지 실패: ${err instanceof Error ? err.message : String(err)}`;
-      console.error(`❌ Failed to auto-detect ${type}:`, err);
-      setAutoDetectError(errorMsg);
-      setTimeout(() => {
-        setAutoDetectError(null);
-        handleManualSelect(type);
-      }, 2000);
-    } finally {
-      setIsAutoDetecting(false);
+      console.error('Failed to reset ROIs:', err);
     }
   };
+
+  // AUTO-DETECT DISABLED: Users must manually select all ROI regions
+  // const handleAutoDetect = async (type: RoiType) => {
+  //   setIsAutoDetecting(true);
+  //   setAutoDetectError(null);
+  //   try {
+  //     console.log(`🔍 Auto-detecting ${type} ROI...`);
+  //     const result = await autoDetectRois();
+  //     console.log(`📊 Auto-detect result for ${type}:`, result);
+
+  //     if (type === 'level' && result.level) {
+  //       if (result.level_boxes && result.level_boxes.length > 0) {
+  //         await setLevelWithBoxes(result.level, result.level_boxes);
+  //         console.log(`✅ Level ROI auto-detected with ${result.level_boxes.length} digit boxes`);
+  //       } else {
+  //         await setRoi('level', result.level);
+  //         console.log('✅ Level ROI auto-detected');
+  //       }
+  //       await handleViewPreview('level');
+  //     } else if (type === 'inventory' && result.inventory) {
+  //       await setRoi('inventory', result.inventory);
+  //       console.log('✅ Inventory ROI auto-detected');
+  //       await handleViewPreview('inventory');
+  //     } else {
+  //       const errorMsg = `${type} ROI를 자동으로 찾지 못했습니다. 수동으로 선택해주세요.`;
+  //       console.warn(`⚠️ ${errorMsg}`);
+  //       setAutoDetectError(errorMsg);
+  //       setTimeout(() => {
+  //         handleManualSelect(type);
+  //       }, 2000);
+  //     }
+  //   } catch (err) {
+  //     const errorMsg = `자동 감지 실패: ${err instanceof Error ? err.message : String(err)}`;
+  //     console.error(`❌ Failed to auto-detect ${type}:`, err);
+  //     setAutoDetectError(errorMsg);
+  //     setTimeout(() => {
+  //       setAutoDetectError(null);
+  //       handleManualSelect(type);
+  //     }, 2000);
+  //   } finally {
+  //     setIsAutoDetecting(false);
+  //   }
+  // };
 
   // Render RoiSelector outside modal container using Portal
   const roiSelectorPortal = isSelecting && currentRoiType ? createPortal(
@@ -280,11 +302,8 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
                 // Determine button behavior
                 const handleButtonClick = () => {
                   if (isRoiValid) {
-                    // Valid ROI exists (auto or manual): show preview
+                    // Valid ROI exists: show preview
                     handleViewPreview(type);
-                  } else if (autoDetect) {
-                    // Auto-detect enabled but ROI not found: retry auto-detect
-                    handleAutoDetect(type);
                   } else {
                     // Manual only: show example and manual select
                     handleManualSelect(type);
@@ -294,9 +313,6 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
                 const getButtonTitle = () => {
                   if (isRoiValid) {
                     return `${label} 미리보기`;
-                  }
-                  if (autoDetect) {
-                    return `${label} 자동 감지 시도 (클릭)`;
                   }
                   return `${label} 영역 선택 (예시 보기)`;
                 };
@@ -321,15 +337,7 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
                         <img src={icon as string} alt={label} className="roi-icon-img" />
                       )}
                       <span className="roi-label">{label}</span>
-                      {autoDetect ? (
-                        isRoiValid ? (
-                          <span className="roi-auto-badge">자동</span>
-                        ) : (
-                          <span className="roi-auto-badge-warning">미감지</span>
-                        )
-                      ) : (
-                        isConfigured && <span className="roi-check">✓</span>
-                      )}
+                      {isConfigured && <span className="roi-check">✓</span>}
                     </button>
                   </div>
                 );
@@ -353,6 +361,27 @@ export function CompactRoiManager({ onSelectingChange }: CompactRoiManagerProps)
             {autoDetectError && (
               <div className="roi-init-status roi-init-error">
                 <span>⚠️ {autoDetectError}</span>
+              </div>
+            )}
+
+            {isInitialized && (levelRoi || expRoi || inventoryRoi) && (
+              <div style={{ marginTop: '10px', textAlign: 'center' }}>
+                <button
+                  onClick={handleResetAllRois}
+                  className="roi-reset-all-btn"
+                  style={{
+                    padding: '8px 16px',
+                    backgroundColor: '#f44336',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                    fontWeight: '500'
+                  }}
+                >
+                  🔄 전체 영역 초기화
+                </button>
               </div>
             )}
           </div>

@@ -24,17 +24,19 @@ export interface TrackingStats {
 }
 
 /**
- * Start OCR tracking with 3 parallel tasks (Level, EXP, Inventory with auto ROI)
- * Inventory region is automatically detected from full screen
+ * Start OCR tracking with 3 parallel tasks (Level, EXP, Inventory all with manual ROI)
+ * All regions must be manually selected by the user
  * Potion slot mapping is configured via settings
  */
 export async function startOcrTracking(
   levelRoi: Roi,
-  expRoi: Roi
+  expRoi: Roi,
+  inventoryRoi: Roi
 ): Promise<void> {
   await invoke('start_ocr_tracking', {
     levelRoi,
     expRoi,
+    inventoryRoi,
   });
 }
 

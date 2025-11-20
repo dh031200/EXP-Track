@@ -159,27 +159,28 @@ export const useRoiStore = create<RoiState>()(
       loadAllRois: async () => {
         set({ isLoading: true, error: null });
         try {
-          const [levelRoi, expRoi, hpRoi, mpRoi] = await Promise.all([
-            loadRoi('level'),
-            loadRoi('exp'),
-            loadRoi('hp'),
-            loadRoi('mp'),
+          const [levelRoi, expRoi, inventoryRoi] = await Promise.all([
+            loadRoi('level').catch(() => null),
+            loadRoi('exp').catch(() => null),
+            loadRoi('inventory').catch(() => null),
             // loadRoi('mapLocation'), // Commented out temporarily
           ]);
 
           set({
             levelRoi,
             expRoi,
-            hpRoi,
-            mpRoi,
-            // inventoryRoi is auto-detected, not loaded from config
+            inventoryRoi,
+            // hp/mp ROIs are deprecated - using inventory instead
+            hpRoi: null,
+            mpRoi: null,
             // mapLocationRoi, // Commented out temporarily
             isLoading: false,
           });
         } catch (err) {
           const error = err instanceof Error ? err.message : 'Failed to load ROIs';
           set({ error, isLoading: false });
-          throw new Error(error);
+          // Don't throw - just log the error
+          console.error('Failed to load ROIs:', error);
         }
       },
 

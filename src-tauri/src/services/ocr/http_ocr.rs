@@ -309,62 +309,143 @@ impl HttpOcrClient {
             .map_err(|e| format!("Failed to parse MP potion count '{}': {}", digits, e))
     }
 
-    /// Recognize level from image using template matching (with RapidOCR fallback)
+    /// Recognize level from image using PaddleOCR
     pub async fn recognize_level(&self, image: &DynamicImage) -> Result<LevelResult, String> {
-        // Try template matching first if available
-        if let Some(matcher) = &self.template_matcher {
-            let matcher = Arc::clone(matcher);
-            let image = image.clone();
-
-            // Run blocking template matching in dedicated thread pool
-            let result = tokio::task::spawn_blocking(move || {
-                matcher.recognize_level(&image)
-            }).await.map_err(|e| format!("Template matching task failed: {}", e))?;
-
-            match result {
-                Ok(level) => {
-                    return Ok(LevelResult {
-                        level,
-                        raw_text: format!("LV. {}", level),
-                    });
-                }
-                Err(_e) => {
-                    // Fall back to RapidOCR
-                }
-            }
+        #[derive(Deserialize)]
+        struct LevelResponse {
+            level: u32,
+            raw_text: String,
+            confidence: f64,
         }
 
-        // Fall back to RapidOCR
-        let text = self.recognize_text(image).await?;
-        let level = Self::parse_level(&text)?;
+        let image_base64 = Self::encode_image(image)?;
+        let url = format!("{}/recognize/level", self.base_url);
+        
+        let response = self.client
+            .post(&url)
+            .json(&serde_json::json!({ "image": image_base64 }))
+            .send()
+            .await
+            .map_err(|e| format!("HTTP request failed: {}", e))?;
 
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(format!("OCR server error ({}): {}", status, body));
+        }
+
+        let result: LevelResponse = response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+        println!("🔍 [OCR Raw] Level: '{}' (confidence: {:.3})", result.raw_text, result.confidence);
+        
         Ok(LevelResult {
-            level,
-            raw_text: format!("LV. {}", level),
+            level: result.level,
+            raw_text: result.raw_text,
         })
     }
 
-    /// Recognize EXP from image
+    /// Recognize EXP from image using PaddleOCR
     pub async fn recognize_exp(&self, image: &DynamicImage) -> Result<ExpResult, String> {
-        let text = self.recognize_text(image).await?;
-        let (absolute, percentage) = Self::parse_exp(&text)?;
+        #[derive(Deserialize)]
+        struct ExpResponse {
+            absolute: i64,
+            percentage: f64,
+            raw_text: String,
+            confidence: f64,
+        }
 
+        let image_base64 = Self::encode_image(image)?;
+        let url = format!("{}/recognize/exp", self.base_url);
+        
+        let response = self.client
+            .post(&url)
+            .json(&serde_json::json!({ "image": image_base64 }))
+            .send()
+            .await
+            .map_err(|e| format!("HTTP request failed: {}", e))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(format!("OCR server error ({}): {}", status, body));
+        }
+
+        let result: ExpResponse = response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+        println!("🔍 [OCR Raw] EXP: '{}' (confidence: {:.3})", result.raw_text, result.confidence);
+        
         Ok(ExpResult {
-            absolute,
-            percentage,
-            raw_text: text,
+            absolute: result.absolute as u64,
+            percentage: result.percentage,
+            raw_text: result.raw_text,
         })
     }
 
-    /// Recognize HP potion count from image
+    /// Recognize HP potion count from image using PaddleOCR
     pub async fn recognize_hp_potion_count(&self, image: &DynamicImage) -> Result<u32, String> {
-        let text = self.recognize_text(image).await?;
-        Self::parse_hp_potion_count(&text)
+        #[derive(Deserialize)]
+        struct PotionResponse {
+            count: u32,
+            confidence: f64,
+        }
+
+        let image_base64 = Self::encode_image(image)?;
+        let url = format!("{}/recognize/hp_potion", self.base_url);
+        
+        let response = self.client
+            .post(&url)
+            .json(&serde_json::json!({ "image": image_base64 }))
+            .send()
+            .await
+            .map_err(|e| format!("HTTP request failed: {}", e))?;
+
+        if !response.status().is_success() {
+            return Err(format!("Server returned error: {}", response.status()));
+        }
+
+        let result: PotionResponse = response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+        println!("🔍 [OCR Raw] HP: {} (confidence: {:.3})", result.count, result.confidence);
+        Ok(result.count)
     }
 
-    /// Recognize MP potion count from image
+    /// Recognize MP potion count from image using PaddleOCR
     pub async fn recognize_mp_potion_count(&self, image: &DynamicImage) -> Result<u32, String> {
-        let text = self.recognize_text(image).await?;
-        Self::parse_mp_potion_count(&text)
+        #[derive(Deserialize)]
+        struct PotionResponse {
+            count: u32,
+            confidence: f64,
+        }
+
+        let image_base64 = Self::encode_image(image)?;
+        let url = format!("{}/recognize/mp_potion", self.base_url);
+        
+        let response = self.client
+            .post(&url)
+            .json(&serde_json::json!({ "image": image_base64 }))
+            .send()
+            .await
+            .map_err(|e| format!("HTTP request failed: {}", e))?;
+
+        if !response.status().is_success() {
+            return Err(format!("Server returned error: {}", response.status()));
+        }
+
+        let result: PotionResponse = response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+        println!("🔍 [OCR Raw] MP: {} (confidence: {:.3})", result.count, result.confidence);
+        Ok(result.count)
     }
 }

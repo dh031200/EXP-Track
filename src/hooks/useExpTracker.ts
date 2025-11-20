@@ -31,12 +31,12 @@ export interface UseExpTrackerReturn {
  * Simplified hook for EXP tracking with Rust-managed state
  *
  * - All OCR processing happens in Rust (3 parallel tokio tasks: Level, EXP, Inventory)
- * - Inventory uses automatic ROI detection from full screen
+ * - All ROIs use manual selection
  * - Frontend polls stats every 500ms
  * - No complex state management in frontend
  */
 export function useExpTracker(): UseExpTrackerReturn {
-  const { levelRoi, expRoi } = useRoiStore();
+  const { levelRoi, expRoi, inventoryRoi } = useRoiStore();
 
   const [state, setState] = useState<ExpTrackerState>({
     stats: null,
@@ -70,14 +70,14 @@ export function useExpTracker(): UseExpTrackerReturn {
    * Start tracking and polling
    */
   const start = useCallback(async () => {
-    if (!levelRoi || !expRoi) {
-      setState(prev => ({ ...prev, error: 'Level and EXP ROIs must be configured' }));
+    if (!levelRoi || !expRoi || !inventoryRoi) {
+      setState(prev => ({ ...prev, error: 'Level, EXP, and Inventory ROIs must be configured' }));
       return;
     }
 
     try {
-      // Start Rust-side OCR tracking (inventory auto-detects ROI)
-      await startOcrTracking(levelRoi, expRoi);
+      // Start Rust-side OCR tracking (all ROIs are manual)
+      await startOcrTracking(levelRoi, expRoi, inventoryRoi);
 
       isTrackingRef.current = true;
       setState(prev => ({ ...prev, isTracking: true, error: null }));
@@ -88,7 +88,7 @@ export function useExpTracker(): UseExpTrackerReturn {
       const errorMsg = err instanceof Error ? err.message : String(err);
       setState(prev => ({ ...prev, error: errorMsg }));
     }
-  }, [levelRoi, expRoi, pollStats]);
+  }, [levelRoi, expRoi, inventoryRoi, pollStats]);
 
   /**
    * Stop tracking and polling

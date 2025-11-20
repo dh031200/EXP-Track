@@ -49,11 +49,7 @@ pub fn save_roi(
         RoiType::Exp => config.roi.exp = Some(roi),
         RoiType::Hp => config.roi.hp = Some(roi),
         RoiType::Mp => config.roi.mp = Some(roi),
-        RoiType::Inventory => {
-            // Inventory ROI is auto-detected, but we allow saving it temporarily
-            // It won't be persisted to config file, just kept in memory
-            return Ok(());
-        }
+        RoiType::Inventory => config.roi.inventory = Some(roi),
         // RoiType::Meso => config.roi.meso = Some(roi), // Commented out temporarily
         // RoiType::MapLocation => config.roi.map_location = Some(roi), // Commented out temporarily
     }
@@ -78,9 +74,7 @@ pub fn load_roi(state: State<ConfigManagerState>, roi_type: RoiType) -> Result<O
         RoiType::Exp => config.roi.exp,
         RoiType::Hp => config.roi.hp,
         RoiType::Mp => config.roi.mp,
-        RoiType::Inventory => {
-            return Err("Inventory ROI is auto-detected and cannot be manually loaded".to_string());
-        }
+        RoiType::Inventory => config.roi.inventory,
         // RoiType::Meso => config.roi.meso, // Commented out temporarily
         // RoiType::MapLocation => config.roi.map_location, // Commented out temporarily
     };
@@ -116,9 +110,7 @@ pub fn clear_roi(state: State<ConfigManagerState>, roi_type: RoiType) -> Result<
         RoiType::Exp => config.roi.exp = None,
         RoiType::Hp => config.roi.hp = None,
         RoiType::Mp => config.roi.mp = None,
-        RoiType::Inventory => {
-            return Err("Inventory ROI is auto-detected and cannot be manually cleared".to_string());
-        }
+        RoiType::Inventory => config.roi.inventory = None,
         // RoiType::Meso => config.roi.meso = None, // Commented out temporarily
         // RoiType::MapLocation => config.roi.map_location = None, // Commented out temporarily
     }
@@ -265,8 +257,14 @@ pub fn get_potion_slot_config(state: State<ConfigManagerState>) -> Result<Potion
         .lock()
         .map_err(|e| format!("Failed to lock config manager: {}", e))?;
 
-    let config = manager.load()?;
-    Ok(config.potion)
+    // Return default config if load fails
+    match manager.load() {
+        Ok(config) => Ok(config.potion),
+        Err(_) => {
+            // Config file doesn't exist or is corrupted, return default
+            Ok(PotionConfig::default())
+        }
+    }
 }
 
 /// Set potion slot configuration
@@ -282,7 +280,15 @@ pub fn set_potion_slot_config(
         .lock()
         .map_err(|e| format!("Failed to lock config manager: {}", e))?;
 
-    let mut config = manager.load()?;
+    // Load existing config or create new one if it doesn't exist
+    let mut config = match manager.load() {
+        Ok(cfg) => cfg,
+        Err(_) => {
+            // Config doesn't exist, create new one with defaults
+            AppConfig::default()
+        }
+    };
+    
     config.potion = potion_config;
     manager.save(&config)?;
 

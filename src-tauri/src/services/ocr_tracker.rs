@@ -15,6 +15,53 @@ use tokio::sync::Mutex;
 use tokio::time::sleep;
 use image::DynamicImage;
 use std::fs;
+use std::path::Path;
+use chrono::Local;
+
+/// Save debug image to D:\wjh1065\Projects\tmp
+fn save_debug_image(image: &DynamicImage, prefix: &str) {
+    let debug_dir = Path::new("D:\\wjh1065\\Projects\\tmp");
+    
+    // Create directory if it doesn't exist
+    if !debug_dir.exists() {
+        if let Err(e) = fs::create_dir_all(debug_dir) {
+            eprintln!("Failed to create debug directory: {}", e);
+            return;
+        }
+    }
+    
+    let timestamp = Local::now().format("%Y%m%d_%H%M%S_%3f");
+    let filename = format!("{}_{}.png", prefix, timestamp);
+    let filepath = debug_dir.join(filename);
+    
+    if let Err(e) = image.save(&filepath) {
+        eprintln!("Failed to save debug image {}: {}", prefix, e);
+    } else {
+        println!("💾 Saved debug image: {:?}", filepath);
+    }
+}
+
+fn save_debug_slot_image(image: &image::ImageBuffer<image::Rgba<u8>, Vec<u8>>, slot_name: &str) {
+    let debug_dir = Path::new("D:\\wjh1065\\Projects\\tmp");
+    
+    // Create directory if it doesn't exist
+    if !debug_dir.exists() {
+        if let Err(e) = fs::create_dir_all(debug_dir) {
+            eprintln!("Failed to create debug directory: {}", e);
+            return;
+        }
+    }
+    
+    let timestamp = Local::now().format("%Y%m%d_%H%M%S_%3f");
+    let filename = format!("POTION_{}_{}.png", slot_name.to_uppercase(), timestamp);
+    let filepath = debug_dir.join(filename);
+    
+    if let Err(e) = image.save(&filepath) {
+        eprintln!("Failed to save debug slot image: {}", e);
+    } else {
+        println!("💾 Saved potion slot debug image: {:?}", filepath);
+    }
+}
 
 /// Current tracking statistics
 #[derive(Debug, Clone, Serialize)]
@@ -232,11 +279,12 @@ impl OcrTracker {
     }
 
     /// Start OCR tracking with 3 independent parallel tasks (Level, EXP, Inventory)
-    /// Inventory recognition uses automatic ROI detection
+    /// All ROIs now use manual selection
     pub async fn start_tracking(
         &mut self,
         level_roi: Roi,
         exp_roi: Roi,
+        inventory_roi: Roi,
     ) -> Result<(), String> {
         // Check if already tracking - prevent reinitialization
         let mut state = self.state.lock().await;
@@ -264,7 +312,7 @@ impl OcrTracker {
 
         // Spawn OCR tasks: combined Level+Inventory (shared capture), separate EXP, health check
         // Store handles to allow proper cancellation
-        let task1 = self.spawn_combined_level_inventory_loop(level_roi, self.app.clone());
+        let task1 = self.spawn_combined_level_inventory_loop(level_roi, inventory_roi, self.app.clone());
         let task2 = self.spawn_exp_loop(exp_roi, self.app.clone());
         let task3 = self.spawn_health_check_loop(self.app.clone());
 
@@ -309,20 +357,23 @@ impl OcrTracker {
         Ok(())
     }
 
-    /// Combined Level + Inventory OCR loop (shares full screen capture for efficiency)
-    fn spawn_combined_level_inventory_loop(&self, _roi: Roi, app: AppHandle) -> tokio::task::JoinHandle<()> {
+    /// Combined Level + Inventory OCR loop (uses manual ROIs)
+    fn spawn_combined_level_inventory_loop(&self, level_roi: Roi, inventory_roi: Roi, app: AppHandle) -> tokio::task::JoinHandle<()> {
         let state = Arc::clone(&self.state);
         let stop_signal = Arc::clone(&self.stop_signal);
         let screen_capture = Arc::clone(&self.screen_capture);
         let ocr_service = Arc::clone(&self.ocr_service);
 
         tokio::spawn(async move {
+            // Get scale factor once
+            let scale_factor = screen_capture.get_scale_factor();
+            
             // Image cache for duplicate detection
             let mut last_image_bytes: Option<Vec<u8>> = None;
 
-            // ROI memoization for performance (caches detected regions)
-            let mut memoized_level_roi: Option<(u32, u32, u32, u32)> = None;
-            let mut memoized_inventory_roi: Option<(u32, u32, u32, u32)> = None;
+            // AUTO-DETECT DISABLED: ROI memoization removed, using manual ROIs
+            // let mut memoized_level_roi: Option<(u32, u32, u32, u32)> = None;
+            // let mut memoized_inventory_roi: Option<(u32, u32, u32, u32)> = None;
 
             while !*stop_signal.lock().await {
                 let _start = std::time::Instant::now();
@@ -345,7 +396,7 @@ impl OcrTracker {
                         // Share captured image via Arc to avoid cloning full image
                         let image = Arc::new(image);
 
-                        // Spawn Level OCR as independent task with ROI memoization
+                        // Spawn Level OCR as independent task with manual ROI
                         {
                             let http_client = {
                                 let service = ocr_service.lock();
@@ -354,44 +405,52 @@ impl OcrTracker {
                             let image = Arc::clone(&image);
                             let app = app.clone();
                             let state = Arc::clone(&state);
-                            let memoized_roi = memoized_level_roi.clone();
 
-                            let updated_roi = tokio::spawn(async move {
-                                // Try memoized ROI first (fast path)
-                                if let Some((left, top, right, bottom)) = memoized_roi {
-                                    let width = right - left + 1;
-                                    let height = bottom - top + 1;
-                                    let cropped = image.crop_imm(left, top, width, height);
-
-                                    if let Ok(result) = http_client.recognize_level(&cropped).await {
-                                        return (Ok(result), Some((left, top, right, bottom)));
-                                    }
-                                }
-
-                                // Fallback: Full detection
-                                match http_client.recognize_level(&*image).await {
-                                    Ok(result) => {
-                                        // Try to detect ROI for memoization
-                                        let roi = http_client.detect_level_roi(&*image).ok();
-                                        (Ok(result), roi)
-                                    }
-                                    Err(e) => (Err(e), None)
-                                }
+                            // Use manual ROI directly
+                            let level_result = tokio::spawn(async move {
+                                println!("📐 [ROI] Level - x:{}, y:{}, w:{}, h:{} (scale: {})", 
+                                    level_roi.x, level_roi.y, level_roi.width, level_roi.height, scale_factor);
+                                
+                                // Apply scale factor for physical pixel coordinates
+                                let physical_x = (level_roi.x as f64 * scale_factor) as u32;
+                                let physical_y = (level_roi.y as f64 * scale_factor) as u32;
+                                let physical_width = (level_roi.width as f64 * scale_factor) as u32;
+                                let physical_height = (level_roi.height as f64 * scale_factor) as u32;
+                                
+                                println!("📐 [Physical] Level - x:{}, y:{}, w:{}, h:{}", 
+                                    physical_x, physical_y, physical_width, physical_height);
+                                
+                                // Crop image using physical coordinates
+                                let cropped = image.crop_imm(
+                                    physical_x,
+                                    physical_y,
+                                    physical_width,
+                                    physical_height
+                                );
+                                
+                                // Save debug image
+                                save_debug_image(&cropped, "LEVEL");
+                                
+                                http_client.recognize_level(&cropped).await
                             }).await;
 
-                            let (level_result, new_roi) = match updated_roi {
-                                Ok((result, roi)) => (result, roi),
-                                Err(e) => (Err(format!("Task failed: {}", e)), None)
+                            let level_result = match level_result {
+                                Ok(result) => result,
+                                Err(e) => Err(format!("Task failed: {}", e))
                             };
 
-                            // Update memoized ROI if we got a new one
-                            if new_roi.is_some() {
-                                memoized_level_roi = new_roi;
-                            }
+                            // AUTO-DETECT DISABLED: ROI memoization removed
+                            // if new_roi.is_some() {
+                            //     memoized_level_roi = new_roi;
+                            // }
 
                             match level_result {
                                 Ok(result) => {
-                                    println!("📊 [LEVEL] {} (text: '{}')", result.level, result.raw_text);
+                                    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                                    println!("[OCR - LEVEL]");
+                                    println!("  📊 Level: {}", result.level);
+                                    println!("  📝 Raw Text: '{}'", result.raw_text);
+                                    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
                                     
                                     let should_emit = {
                                         let mut state = state.lock().await;
@@ -404,103 +463,151 @@ impl OcrTracker {
                                         }
                                     }
                                 }
-                                Err(_e) => {
-                                    // Level OCR failed, will retry on next cycle
+                                Err(e) => {
+                                    println!("❌ [OCR - LEVEL] Failed: {}", e);
                                 }
                             }
                         }
 
-                        // Spawn Inventory OCR as independent task with ROI memoization
+                        // Spawn Inventory OCR as independent task with manual ROI
                         {
                             let ocr_service_clone = Arc::clone(&ocr_service);
                             let image = Arc::clone(&image);
                             let app = app.clone();
                             let state = Arc::clone(&state);
-                            let memoized_roi = memoized_inventory_roi.clone();
 
                             let app_handle = app.clone();
-                            let updated_roi = tokio::spawn(async move {
-                                let inventory_result = tokio::task::spawn_blocking(move || {
-                                    // Load config to get active potion slots
-                                    let potion_config = {
-                                        if let Some(config_state) = app_handle.try_state::<std::sync::Mutex<ConfigManager>>() {
-                                            match config_state.lock() {
-                                                Ok(manager) => match manager.load() {
-                                                    Ok(config) => config.potion,
-                                                    Err(_) => PotionConfig::default()
-                                                },
+                            let http_client = {
+                                let service = ocr_service_clone.lock();
+                                service.http_client.clone()
+                            };
+                            
+                            let inventory_result = tokio::spawn(async move {
+                                // Load config to get active potion slots
+                                let potion_config = {
+                                    if let Some(config_state) = app_handle.try_state::<std::sync::Mutex<ConfigManager>>() {
+                                        match config_state.lock() {
+                                            Ok(manager) => match manager.load() {
+                                                Ok(config) => config.potion,
                                                 Err(_) => PotionConfig::default()
-                                            }
-                                        } else {
-                                            PotionConfig::default()
+                                            },
+                                            Err(_) => PotionConfig::default()
                                         }
-                                    };
-                                    let slots = vec![potion_config.hp_potion_slot.clone(), potion_config.mp_potion_slot.clone()];
-
-                                    let service = ocr_service_clone.lock();
-
-                                    // Try memoized ROI first (fast path)
-                                    if let Some((left, top, right, bottom)) = memoized_roi {
-                                        let padding = 100;
-                                        let img_width = image.width();
-                                        let img_height = image.height();
-                                        let padded_left = left.saturating_sub(padding);
-                                        let padded_top = top.saturating_sub(padding);
-                                        let padded_right = (right + padding).min(img_width - 1);
-                                        let padded_bottom = (bottom + padding).min(img_height - 1);
-
-                                        let crop_width = padded_right - padded_left + 1;
-                                        let crop_height = padded_bottom - padded_top + 1;
-                                        let cropped = image.crop_imm(padded_left, padded_top, crop_width, crop_height);
-
-                                        if let Ok(results) = service.recognize_specific_inventory(&cropped, &slots) {
-                                            return Ok((results, Some((left, top, right, bottom)), potion_config));
-                                        }
+                                    } else {
+                                        PotionConfig::default()
                                     }
+                                };
 
-                                    // Fallback: Full detection
-                                    match service.recognize_specific_inventory(&*image, &slots) {
-                                        Ok(results) => {
-                                            // Try to get ROI coordinates for memoization
-                                            if let Some(matcher) = &service.inventory_matcher {
-                                                if let Ok((_, coords)) = matcher.detect_inventory_region_with_coords(&*image) {
-                                                    let (left, top, right, bottom) = coords;
-                                                    let width = right - left + 1;
-                                                    let height = bottom - top + 1;
-                                                    let cropped_original = image::imageops::crop_imm(&*image, left, top, width, height);
-                                                    let dynamic_img = DynamicImage::ImageRgba8(cropped_original.to_image());
-                                                    save_inventory_preview(&dynamic_img);
-                                                    
-                                                    return Ok((results, Some(coords), potion_config));
-                                                }
-                                            }
-                                            Ok((results, None, potion_config))
-                                        }
-                                        Err(e) => Err(e)
+                                println!("📐 [ROI] Inventory - x:{}, y:{}, w:{}, h:{} (scale: {})", 
+                                    inventory_roi.x, inventory_roi.y, inventory_roi.width, inventory_roi.height, scale_factor);
+                                
+                                // Apply scale factor for physical pixel coordinates
+                                let physical_x = (inventory_roi.x as f64 * scale_factor) as u32;
+                                let physical_y = (inventory_roi.y as f64 * scale_factor) as u32;
+                                let physical_width = (inventory_roi.width as f64 * scale_factor) as u32;
+                                let physical_height = (inventory_roi.height as f64 * scale_factor) as u32;
+                                
+                                println!("📐 [Physical] Inventory - x:{}, y:{}, w:{}, h:{}", 
+                                    physical_x, physical_y, physical_width, physical_height);
+                                
+                                // Use manual ROI directly - crop full inventory with physical coordinates
+                                let cropped = image.crop_imm(
+                                    physical_x,
+                                    physical_y,
+                                    physical_width,
+                                    physical_height
+                                );
+
+                                // Don't save full inventory - only save individual potion slots below
+
+                                // Divide inventory into 8 slots (2 rows x 4 columns)
+                                let slot_width = cropped.width() / 4;
+                                let slot_height = cropped.height() / 2;
+                                
+                                // Parse slot positions (e.g., "Delete" -> row 0, col 0)
+                                let parse_slot = |slot: &str| -> Option<(u32, u32)> {
+                                    match slot {
+                                        "Delete" => Some((0, 0)),
+                                        "End" => Some((0, 1)),
+                                        "Home" => Some((0, 2)),
+                                        "PageUp" => Some((0, 3)),
+                                        "Insert" => Some((1, 0)),
+                                        "PageDown" => Some((1, 1)),
+                                        _ => None,
                                     }
-                                }).await;
+                                };
 
-                                match inventory_result {
-                                    Ok(Ok((results, roi, config))) => (Ok((results, config)), roi),
-                                    Ok(Err(e)) => (Err(e), None),
-                                    Err(e) => (Err(format!("Task failed: {}", e)), None)
+                                // Helper function to crop slot and bottom 45%
+                                let crop_slot_bottom = |slot_name: &str| -> Option<image::DynamicImage> {
+                                    let (row, col) = parse_slot(slot_name)?;
+                                    
+                                    let x = col * slot_width;
+                                    let y = row * slot_height;
+                                    
+                                    // Crop the slot
+                                    let slot_image = cropped.crop_imm(x, y, slot_width, slot_height);
+                                    
+                                    // Crop bottom 45% of the slot
+                                    let bottom_height = (slot_height as f64 * 0.45) as u32;
+                                    let bottom_y = slot_height - bottom_height;
+                                    
+                                    let bottom_crop = slot_image.crop_imm(0, bottom_y, slot_width, bottom_height);
+                                    
+                                    // Save debug image for this slot
+                                    save_debug_slot_image(&bottom_crop.to_rgba8(), slot_name);
+                                    
+                                    Some(bottom_crop)
+                                };
+
+                                // Process HP potion slot
+                                let hp_result = if let Some(hp_slot_image) = crop_slot_bottom(&potion_config.hp_potion_slot) {
+                                    http_client.recognize_hp_potion_count(&hp_slot_image).await
+                                } else {
+                                    Err(format!("Invalid HP slot: {}", potion_config.hp_potion_slot))
+                                };
+
+                                // Process MP potion slot
+                                let mp_result = if let Some(mp_slot_image) = crop_slot_bottom(&potion_config.mp_potion_slot) {
+                                    http_client.recognize_mp_potion_count(&mp_slot_image).await
+                                } else {
+                                    Err(format!("Invalid MP slot: {}", potion_config.mp_potion_slot))
+                                };
+
+                                match (hp_result, mp_result) {
+                                    (Ok(hp_count), Ok(mp_count)) => {
+                                        let mut results = std::collections::HashMap::new();
+                                        results.insert(potion_config.hp_potion_slot.clone(), hp_count);
+                                        results.insert(potion_config.mp_potion_slot.clone(), mp_count);
+                                        Ok((results, potion_config))
+                                    }
+                                    (Err(e), _) => Err(format!("HP potion OCR failed: {}", e)),
+                                    (_, Err(e)) => Err(format!("MP potion OCR failed: {}", e)),
                                 }
+
                             }).await;
 
-                            let (inventory_result, new_roi) = match updated_roi {
+                            // Flatten tokio::spawn result
+                            let inventory_result = match inventory_result {
                                 Ok(result) => result,
-                                Err(e) => (Err(format!("Spawn failed: {}", e)), None)
+                                Err(e) => Err(format!("Task failed: {}", e))
                             };
 
-                            // Update memoized ROI if we got a new one
-                            if new_roi.is_some() {
-                                memoized_inventory_roi = new_roi;
-                            }
+                            // AUTO-DETECT DISABLED: ROI memoization removed
+                            // if new_roi.is_some() {
+                            //     memoized_inventory_roi = new_roi;
+                            // }
 
                             match inventory_result {
                                 Ok((inventory, potion_config)) => {
                                     let hp_potion_count = *inventory.get(&potion_config.hp_potion_slot).unwrap_or(&0);
                                     let mp_potion_count = *inventory.get(&potion_config.mp_potion_slot).unwrap_or(&0);
+
+                                    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                                    println!("[OCR - POTION]");
+                                    println!("  💊 HP Slot ({}): {}", potion_config.hp_potion_slot, hp_potion_count);
+                                    println!("  💙 MP Slot ({}): {}", potion_config.mp_potion_slot, mp_potion_count);
+                                    println!("  🔍 Method: PaddleOCR (HTTP)");
+                                    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
                                     let mut state = state.lock().await;
                                     state.hp_potion_count = Some(hp_potion_count);
@@ -525,8 +632,8 @@ impl OcrTracker {
                                         eprintln!("Failed to emit MP potion update: {}", e);
                                     }
                                 }
-                                Err(_e) => {
-                                    // Inventory OCR failed, will retry on next cycle
+                                Err(e) => {
+                                    println!("❌ [OCR - POTION] Failed: {}", e);
                                 }
                             }
                         }
@@ -662,6 +769,13 @@ impl OcrTracker {
                         }
 
                         // Image changed - run OCR
+                        let scale_factor = screen_capture.get_scale_factor();
+                        println!("📐 [ROI] EXP - x:{}, y:{}, w:{}, h:{} (scale: {})", 
+                            roi.x, roi.y, roi.width, roi.height, scale_factor);
+                        
+                        // Save debug image
+                        save_debug_image(&image, "EXP");
+                        
                         let http_client = {
                             let service = ocr_service.lock();
                             service.http_client.clone()
@@ -669,8 +783,12 @@ impl OcrTracker {
                         
                         match http_client.recognize_exp(&image).await {
                             Ok(result) => {
-                                println!("📊 [EXP] {} [{:.2}%] (text: '{}')", 
-                                    result.absolute, result.percentage, result.raw_text);
+                                println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                                println!("[OCR - EXP]");
+                                println!("  📊 Absolute: {}", result.absolute);
+                                println!("  📊 Percentage: {:.2}%", result.percentage);
+                                println!("  📝 Raw Text: '{}'", result.raw_text);
+                                println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
                                 
                                 let should_emit = {
                                     let mut state_guard = state.lock().await;
@@ -687,8 +805,8 @@ impl OcrTracker {
                                     }
                                 }
                             }
-                            Err(_e) => {
-                                // EXP OCR failed, will retry on next cycle
+                            Err(e) => {
+                                println!("❌ [OCR - EXP] Failed: {}", e);
                             }
                         }
 

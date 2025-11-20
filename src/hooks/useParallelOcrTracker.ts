@@ -36,7 +36,7 @@ interface TrackingStats {
  * - Integrates with ExpCalculator backend
  */
 export function useParallelOcrTracker() {
-  const { levelRoi, expRoi } = useRoiStore();
+  const { levelRoi, expRoi, inventoryRoi } = useRoiStore();
 
   const isTrackingRef = useRef(false);
   const sessionStartedRef = useRef(false);
@@ -54,8 +54,8 @@ export function useParallelOcrTracker() {
    * Start OCR tracking via Rust backend
    */
   const start = useCallback(async () => {
-    if (!levelRoi || !expRoi) {
-      console.error('Level and EXP ROIs must be configured');
+    if (!levelRoi || !expRoi || !inventoryRoi) {
+      console.error('Level, EXP, and Inventory ROIs must be configured');
       return;
     }
 
@@ -141,10 +141,11 @@ export function useParallelOcrTracker() {
 
       unlistenersRef.current = [levelUnlisten, expUnlisten, hpPotionUnlisten, mpPotionUnlisten];
 
-      // Call Rust backend to start tracking (inventory auto-detects ROI)
+      // Call Rust backend to start tracking (all ROIs are manual)
       await invoke('start_ocr_tracking', {
         levelRoi,
         expRoi,
+        inventoryRoi,
       });
 
       // Poll stats periodically to update time-based calculations (exp_per_hour, etc.)
@@ -163,7 +164,7 @@ export function useParallelOcrTracker() {
       console.error('❌ Failed to start Rust OCR tracker:', error);
       isTrackingRef.current = false;
     }
-  }, [levelRoi, expRoi]);
+  }, [levelRoi, expRoi, inventoryRoi]);
 
   /**
    * Stop OCR tracking via Rust backend

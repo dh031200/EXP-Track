@@ -14,15 +14,16 @@ impl TrackerState {
     }
 }
 
-/// Start OCR tracking with 3 parallel tasks (Level, EXP, Inventory with auto ROI)
+/// Start OCR tracking with 3 parallel tasks (Level, EXP, Inventory all with manual ROI)
 #[tauri::command]
 pub async fn start_ocr_tracking(
     level_roi: Roi,
     exp_roi: Roi,
+    inventory_roi: Roi,
     tracker: State<'_, TrackerState>,
 ) -> Result<(), String> {
     let mut tracker = tracker.inner().0.lock().await;
-    tracker.start_tracking(level_roi, exp_roi).await
+    tracker.start_tracking(level_roi, exp_roi, inventory_roi).await
 }
 
 /// Stop OCR tracking

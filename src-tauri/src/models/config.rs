@@ -67,6 +67,8 @@ pub struct RoiConfig {
     pub exp: Option<Roi>,
     pub hp: Option<Roi>,
     pub mp: Option<Roi>,
+    #[serde(default)]
+    pub inventory: Option<Roi>,
     // pub meso: Option<Roi>, // Commented out temporarily
     // pub map_location: Option<Roi>, // Commented out temporarily
 }

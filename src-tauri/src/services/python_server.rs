@@ -87,6 +87,8 @@ impl PythonServerManager {
 
         Command::new(server_bin)
             .current_dir(server_dir)
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit())
             .spawn()
             .map_err(|e| format!("Failed to start server: {}", e))
     }

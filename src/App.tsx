@@ -160,60 +160,61 @@ function App() {
   }, [ocrHealthy]);
 
   // Auto-detect ROIs once everything is ready (one-time on app start)
-  useEffect(() => {
-    // Wait for both screen capture and OCR to be ready
-    if (!screenCaptureReady || !ocrHealthy || autoDetectCompleted) return;
+  // AUTO-DETECT DISABLED: Users must manually select all ROI regions
+  // useEffect(() => {
+  //   // Wait for both screen capture and OCR to be ready
+  //   if (!screenCaptureReady || !ocrHealthy || autoDetectCompleted) return;
 
-    console.log('🚀 All systems ready, starting auto-detect...');
+  //   console.log('🚀 All systems ready, starting auto-detect...');
 
-    const performAutoDetect = async () => {
-      let attempts = 0;
-      let detected = false;
+  //   const performAutoDetect = async () => {
+  //     let attempts = 0;
+  //     let detected = false;
 
-      while (attempts < 3 && !detected) {
-        attempts++;
-        try {
-          console.log(`Auto-detecting ROIs (attempt ${attempts}/3)...`);
-          const result = await autoDetectRois();
+  //     while (attempts < 3 && !detected) {
+  //       attempts++;
+  //       try {
+  //         console.log(`Auto-detecting ROIs (attempt ${attempts}/3)...`);
+  //         const result = await autoDetectRois();
 
-          // Save detected ROIs
-          const { setRoi, setLevelWithBoxes } = useRoiStore.getState();
+  //         // Save detected ROIs
+  //         const { setRoi, setLevelWithBoxes } = useRoiStore.getState();
 
-          if (result.level) {
-            // If level boxes are available, use setLevelWithBoxes to store both ROI and boxes
-            if (result.level_boxes && result.level_boxes.length > 0) {
-              await setLevelWithBoxes(result.level, result.level_boxes);
-              console.log(`✅ Level ROI auto-detected with ${result.level_boxes.length} digit boxes`);
-            } else {
-              await setRoi('level', result.level);
-              console.log('✅ Level ROI auto-detected and saved');
-            }
-          }
+  //         if (result.level) {
+  //           // If level boxes are available, use setLevelWithBoxes to store both ROI and boxes
+  //           if (result.level_boxes && result.level_boxes.length > 0) {
+  //             await setLevelWithBoxes(result.level, result.level_boxes);
+  //             console.log(`✅ Level ROI auto-detected with ${result.level_boxes.length} digit boxes`);
+  //           } else {
+  //             await setRoi('level', result.level);
+  //             console.log('✅ Level ROI auto-detected and saved');
+  //           }
+  //         }
 
-          if (result.inventory) {
-            await setRoi('inventory', result.inventory);
-            console.log('✅ Inventory ROI auto-detected and saved');
-          }
+  //         if (result.inventory) {
+  //           await setRoi('inventory', result.inventory);
+  //           console.log('✅ Inventory ROI auto-detected and saved');
+  //         }
 
-          // Consider successful if at least one ROI was detected
-          if (result.level || result.inventory) {
-            detected = true;
-            console.log('✅ Auto-detect completed successfully');
-          }
-        } catch (err) {
-          console.error(`Auto-detect attempt ${attempts} failed:`, err);
-        }
-      }
+  //         // Consider successful if at least one ROI was detected
+  //         if (result.level || result.inventory) {
+  //           detected = true;
+  //           console.log('✅ Auto-detect completed successfully');
+  //         }
+  //       } catch (err) {
+  //         console.error(`Auto-detect attempt ${attempts} failed:`, err);
+  //       }
+  //     }
 
-      if (!detected) {
-        console.warn('⚠️ Failed to auto-detect ROIs after 3 attempts');
-      }
+  //     if (!detected) {
+  //       console.warn('⚠️ Failed to auto-detect ROIs after 3 attempts');
+  //     }
 
-      setAutoDetectCompleted(true);
-    };
+  //     setAutoDetectCompleted(true);
+  //   };
 
-    performAutoDetect();
-  }, [screenCaptureReady, ocrHealthy, autoDetectCompleted]);
+  //   performAutoDetect();
+  // }, [screenCaptureReady, ocrHealthy, autoDetectCompleted]);
 
   // Timer effect - increment every second when tracking
   useEffect(() => {

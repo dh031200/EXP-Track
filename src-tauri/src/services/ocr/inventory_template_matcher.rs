@@ -2,6 +2,7 @@ use image::{DynamicImage, GrayImage, ImageBuffer, Luma, imageops};
 use std::path::Path;
 use std::collections::HashMap;
 use rayon::prelude::*;
+use chrono::Local;
 
 /// Template for digit recognition (inventory numbers)
 #[derive(Debug, Clone)]
@@ -333,6 +334,29 @@ impl InventoryTemplateMatcher {
         component
     }
 
+    /// Save debug image of cropped slot to D:\wjh1065\Projects\tmp
+    fn save_debug_slot_image(&self, image: &DynamicImage, slot: &str) {
+        let debug_dir = Path::new("D:\\wjh1065\\Projects\\tmp");
+        
+        // Create directory if it doesn't exist
+        if !debug_dir.exists() {
+            if let Err(e) = std::fs::create_dir_all(debug_dir) {
+                eprintln!("Failed to create debug directory: {}", e);
+                return;
+            }
+        }
+        
+        let timestamp = Local::now().format("%Y%m%d_%H%M%S_%3f");
+        let filename = format!("POTION_{}_{}.png", slot.to_uppercase(), timestamp);
+        let filepath = debug_dir.join(filename);
+        
+        if let Err(e) = image.save(&filepath) {
+            eprintln!("Failed to save debug image for slot {}: {}", slot, e);
+        } else {
+            println!("💾 Saved debug slot image: {:?}", filepath);
+        }
+    }
+
     /// Recognize potion count in specific slot
     pub fn recognize_count_in_slot(&self, inventory_image: &DynamicImage, slot: &str) -> Result<u32, String> {
         #[cfg(debug_assertions)]
@@ -349,6 +373,11 @@ impl InventoryTemplateMatcher {
         if gray.width() != 522 || gray.height() != 255 {
             return Err(format!("Invalid inventory size: {}x{} (expected 522x255)", gray.width(), gray.height()));
         }
+
+        // Save debug image of the cropped slot
+        let cropped_slot = imageops::crop_imm(inventory_image, roi.x, roi.y, roi.width, roi.height);
+        let cropped_dynamic = DynamicImage::ImageRgba8(cropped_slot.to_image());
+        self.save_debug_slot_image(&cropped_dynamic, slot);
 
         #[cfg(debug_assertions)]
         let _t_prep = std::time::Instant::now();
