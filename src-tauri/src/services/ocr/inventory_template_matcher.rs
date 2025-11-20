@@ -336,7 +336,7 @@ impl InventoryTemplateMatcher {
     /// Recognize potion count in specific slot
     pub fn recognize_count_in_slot(&self, inventory_image: &DynamicImage, slot: &str) -> Result<u32, String> {
         #[cfg(debug_assertions)]
-        let t_start = std::time::Instant::now();
+        let _t_start = std::time::Instant::now();
 
         // Get ROI for slot
         let roi = self.slot_rois.get(slot)
@@ -351,13 +351,13 @@ impl InventoryTemplateMatcher {
         }
 
         #[cfg(debug_assertions)]
-        let t_prep = std::time::Instant::now();
+        let _t_prep = std::time::Instant::now();
 
         // Detect digits in ROI
         let detections = self.detect_digits_in_roi(&gray, roi)?;
 
         #[cfg(debug_assertions)]
-        let t_detect = std::time::Instant::now();
+        let _t_detect = std::time::Instant::now();
 
         if detections.is_empty() {
             return Ok(0); // Empty slot
@@ -386,8 +386,17 @@ impl InventoryTemplateMatcher {
     /// Recognize counts in all 8 inventory slots
     /// Returns HashMap with slot names as keys and item counts as values
     pub fn recognize_all_slots(&self, inventory_image: &DynamicImage) -> Result<HashMap<String, u32>, String> {
+        let slots = vec![
+            "shift".to_string(), "ins".to_string(), "home".to_string(), "pup".to_string(),
+            "ctrl".to_string(), "del".to_string(), "end".to_string(), "pdn".to_string()
+        ];
+        self.recognize_specific_slots(inventory_image, &slots)
+    }
+
+    /// Recognize counts in specific slots
+    pub fn recognize_specific_slots(&self, inventory_image: &DynamicImage, slots: &[String]) -> Result<HashMap<String, u32>, String> {
         #[cfg(debug_assertions)]
-        let t_start = std::time::Instant::now();
+        let _t_start = std::time::Instant::now();
 
         // Verify inventory image size
         let gray = inventory_image.to_luma8();
@@ -396,7 +405,6 @@ impl InventoryTemplateMatcher {
         }
 
         let mut results = HashMap::new();
-        let slots = vec!["shift", "ins", "home", "pup", "ctrl", "del", "end", "pdn"];
 
         for slot in slots {
             // Recognize count in this slot, default to 0 if recognition fails
@@ -410,7 +418,7 @@ impl InventoryTemplateMatcher {
     /// Detect all digits in ROI using multi-scale template matching
     fn detect_digits_in_roi(&self, gray: &GrayImage, roi: &SlotRoi) -> Result<Vec<DigitDetection>, String> {
         #[cfg(debug_assertions)]
-        let t_start = std::time::Instant::now();
+        let _t_start = std::time::Instant::now();
 
         // Extract ROI
         let roi_image = image::imageops::crop_imm(
@@ -422,7 +430,7 @@ impl InventoryTemplateMatcher {
         ).to_image();
 
         #[cfg(debug_assertions)]
-        let t_crop = std::time::Instant::now();
+        let _t_crop = std::time::Instant::now();
 
         // Multi-scale template matching
         let scales = vec![0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3];
@@ -478,13 +486,13 @@ impl InventoryTemplateMatcher {
             .collect();
 
         #[cfg(debug_assertions)]
-        let t_matching_done = std::time::Instant::now();
+        let _t_matching_done = std::time::Instant::now();
 
         // Apply NMS to remove overlapping detections
         let filtered = self.non_maximum_suppression(all_detections, 0.05)?;
 
         #[cfg(debug_assertions)]
-        let t_nms = std::time::Instant::now();
+        let _t_nms = std::time::Instant::now();
 
         // Filter by height consistency
         let height_filtered = self.filter_by_height(filtered, 0.2)?;

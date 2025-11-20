@@ -122,7 +122,7 @@ pub fn run() {
                     // Stop OCR tracking
                     let tracker_state = app.state::<TrackerState>();
                     {
-                        let tracker = tracker_state.inner().0.lock().await;
+                        let mut tracker = tracker_state.inner().0.lock().await;
                         tracker.stop_tracking().await;
 
                         #[cfg(debug_assertions)]

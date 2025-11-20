@@ -209,13 +209,14 @@ struct MpPotionUpdate {
     mp_potion_count: u32,
 }
 
-/// Global OCR Tracker instance
+    /// Global OCR Tracker instance
 pub struct OcrTracker {
     state: Arc<Mutex<TrackerState>>,
     stop_signal: Arc<Mutex<bool>>,
     screen_capture: Arc<ScreenCapture>,
     app: AppHandle,
     ocr_service: OcrServiceState,  // Shared OCR service instance
+    background_tasks: Vec<tokio::task::JoinHandle<()>>, // Store task handles for cleanup
 }
 
 impl OcrTracker {
@@ -226,13 +227,14 @@ impl OcrTracker {
             screen_capture: Arc::new(ScreenCapture::new()?),
             app,
             ocr_service,  // Store shared OCR service
+            background_tasks: Vec::new(),
         })
     }
 
     /// Start OCR tracking with 3 independent parallel tasks (Level, EXP, Inventory)
     /// Inventory recognition uses automatic ROI detection
     pub async fn start_tracking(
-        &self,
+        &mut self,
         level_roi: Roi,
         exp_roi: Roi,
     ) -> Result<(), String> {
@@ -257,18 +259,39 @@ impl OcrTracker {
         // Reset stop signal
         *self.stop_signal.lock().await = false;
 
+        // Clear any existing tasks (safety check)
+        self.abort_background_tasks().await;
+
         // Spawn OCR tasks: combined Level+Inventory (shared capture), separate EXP, health check
-        self.spawn_combined_level_inventory_loop(level_roi, self.app.clone());
-        self.spawn_exp_loop(exp_roi, self.app.clone());
-        self.spawn_health_check_loop(self.app.clone());
+        // Store handles to allow proper cancellation
+        let task1 = self.spawn_combined_level_inventory_loop(level_roi, self.app.clone());
+        let task2 = self.spawn_exp_loop(exp_roi, self.app.clone());
+        let task3 = self.spawn_health_check_loop(self.app.clone());
+
+        self.background_tasks.push(task1);
+        self.background_tasks.push(task2);
+        self.background_tasks.push(task3);
+
         Ok(())
     }
 
     /// Stop all OCR loops
-    pub async fn stop_tracking(&self) {
+    pub async fn stop_tracking(&mut self) {
         *self.stop_signal.lock().await = true;
+        
+        // Abort all background tasks immediately
+        self.abort_background_tasks().await;
+
         let mut state = self.state.lock().await;
         state.is_tracking = false;
+    }
+
+    /// Helper to abort all background tasks
+    async fn abort_background_tasks(&mut self) {
+        for task in &self.background_tasks {
+            task.abort();
+        }
+        self.background_tasks.clear();
     }
 
     /// Get current tracking statistics
@@ -278,15 +301,16 @@ impl OcrTracker {
     }
 
     /// Reset tracking session
-    pub async fn reset(&self) -> Result<(), String> {
-        *self.stop_signal.lock().await = true;
+    pub async fn reset(&mut self) -> Result<(), String> {
+        self.stop_tracking().await;
+        
         let mut state = self.state.lock().await;
         *state = TrackerState::new()?;
         Ok(())
     }
 
     /// Combined Level + Inventory OCR loop (shares full screen capture for efficiency)
-    fn spawn_combined_level_inventory_loop(&self, _roi: Roi, app: AppHandle) {
+    fn spawn_combined_level_inventory_loop(&self, _roi: Roi, app: AppHandle) -> tokio::task::JoinHandle<()> {
         let state = Arc::clone(&self.state);
         let stop_signal = Arc::clone(&self.stop_signal);
         let screen_capture = Arc::clone(&self.screen_capture);
@@ -301,7 +325,7 @@ impl OcrTracker {
             let mut memoized_inventory_roi: Option<(u32, u32, u32, u32)> = None;
 
             while !*stop_signal.lock().await {
-                let start = std::time::Instant::now();
+                let _start = std::time::Instant::now();
 
                 // Single full screen capture for both Level and Inventory
                 match screen_capture.capture_full() {
@@ -394,8 +418,25 @@ impl OcrTracker {
                             let state = Arc::clone(&state);
                             let memoized_roi = memoized_inventory_roi.clone();
 
+                            let app_handle = app.clone();
                             let updated_roi = tokio::spawn(async move {
                                 let inventory_result = tokio::task::spawn_blocking(move || {
+                                    // Load config to get active potion slots
+                                    let potion_config = {
+                                        if let Some(config_state) = app_handle.try_state::<std::sync::Mutex<ConfigManager>>() {
+                                            match config_state.lock() {
+                                                Ok(manager) => match manager.load() {
+                                                    Ok(config) => config.potion,
+                                                    Err(_) => PotionConfig::default()
+                                                },
+                                                Err(_) => PotionConfig::default()
+                                            }
+                                        } else {
+                                            PotionConfig::default()
+                                        }
+                                    };
+                                    let slots = vec![potion_config.hp_potion_slot.clone(), potion_config.mp_potion_slot.clone()];
+
                                     let service = ocr_service_clone.lock();
 
                                     // Try memoized ROI first (fast path)
@@ -412,13 +453,13 @@ impl OcrTracker {
                                         let crop_height = padded_bottom - padded_top + 1;
                                         let cropped = image.crop_imm(padded_left, padded_top, crop_width, crop_height);
 
-                                        if let Ok(results) = service.recognize_inventory(&cropped) {
-                                            return Ok((results, Some((left, top, right, bottom))));
+                                        if let Ok(results) = service.recognize_specific_inventory(&cropped, &slots) {
+                                            return Ok((results, Some((left, top, right, bottom)), potion_config));
                                         }
                                     }
 
                                     // Fallback: Full detection
-                                    match service.recognize_inventory(&*image) {
+                                    match service.recognize_specific_inventory(&*image, &slots) {
                                         Ok(results) => {
                                             // Try to get ROI coordinates for memoization
                                             if let Some(matcher) = &service.inventory_matcher {
@@ -430,17 +471,17 @@ impl OcrTracker {
                                                     let dynamic_img = DynamicImage::ImageRgba8(cropped_original.to_image());
                                                     save_inventory_preview(&dynamic_img);
                                                     
-                                                    return Ok((results, Some(coords)));
+                                                    return Ok((results, Some(coords), potion_config));
                                                 }
                                             }
-                                            Ok((results, None))
+                                            Ok((results, None, potion_config))
                                         }
                                         Err(e) => Err(e)
                                     }
                                 }).await;
 
                                 match inventory_result {
-                                    Ok(Ok((results, roi))) => (Ok(results), roi),
+                                    Ok(Ok((results, roi, config))) => (Ok((results, config)), roi),
                                     Ok(Err(e)) => (Err(e), None),
                                     Err(e) => (Err(format!("Task failed: {}", e)), None)
                                 }
@@ -457,21 +498,7 @@ impl OcrTracker {
                             }
 
                             match inventory_result {
-                                Ok(inventory) => {
-                                    let potion_config = {
-                                        if let Some(config_state) = app.try_state::<std::sync::Mutex<ConfigManager>>() {
-                                            match config_state.lock() {
-                                                Ok(manager) => match manager.load() {
-                                                    Ok(config) => config.potion,
-                                                    Err(_) => PotionConfig::default()
-                                                },
-                                                Err(_) => PotionConfig::default()
-                                            }
-                                        } else {
-                                            PotionConfig::default()
-                                        }
-                                    };
-
+                                Ok((inventory, potion_config)) => {
                                     let hp_potion_count = *inventory.get(&potion_config.hp_potion_slot).unwrap_or(&0);
                                     let mp_potion_count = *inventory.get(&potion_config.mp_potion_slot).unwrap_or(&0);
 
@@ -528,12 +555,12 @@ impl OcrTracker {
                 };
                 sleep(Duration::from_millis(interval_ms)).await;
             }
-        });
+        })
     }
 
     // Independent Level OCR loop with shared OCR service + image caching
     // NOTE: Template matching uses FULL SCREEN, not ROI (roi param unused)
-    fn spawn_level_loop(&self, _roi: Roi, app: AppHandle) {
+    fn spawn_level_loop(&self, _roi: Roi, app: AppHandle) -> tokio::task::JoinHandle<()> {
         let state = Arc::clone(&self.state);
         let stop_signal = Arc::clone(&self.stop_signal);
         let screen_capture = Arc::clone(&self.screen_capture);
@@ -607,11 +634,11 @@ impl OcrTracker {
 
             #[cfg(debug_assertions)]
             println!("⏹️  LEVEL OCR task stopped");
-        });
+        })
     }
 
     // Independent EXP OCR loop with shared OCR service + image caching
-    fn spawn_exp_loop(&self, roi: Roi, app: AppHandle) {
+    fn spawn_exp_loop(&self, roi: Roi, app: AppHandle) -> tokio::task::JoinHandle<()> {
         let state = Arc::clone(&self.state);
         let stop_signal = Arc::clone(&self.stop_signal);
         let screen_capture = Arc::clone(&self.screen_capture);
@@ -689,11 +716,11 @@ impl OcrTracker {
                 };
                 sleep(Duration::from_millis(interval_ms)).await;
             }
-        });
+        })
     }
 
     // Unified Inventory OCR loop - Rust native with automatic ROI detection
-    fn spawn_inventory_loop(&self, app: AppHandle) {
+    fn spawn_inventory_loop(&self, app: AppHandle) -> tokio::task::JoinHandle<()> {
         let state = Arc::clone(&self.state);
         let stop_signal = Arc::clone(&self.stop_signal);
         let screen_capture = Arc::clone(&self.screen_capture);
@@ -740,11 +767,11 @@ impl OcrTracker {
                                 Err(_) => PotionConfig::default()
                             },
                             Err(_) => PotionConfig::default()
+                            }
+                        } else {
+                            PotionConfig::default()
                         }
-                    } else {
-                        PotionConfig::default()
-                    }
-                };
+                    };
 
                                 // Extract HP and MP counts from inventory
                                 let hp_potion_count = *inventory.get(&potion_config.hp_potion_slot).unwrap_or(&0);
@@ -786,12 +813,12 @@ impl OcrTracker {
 
                 sleep(Duration::from_millis(500)).await;
             }
-        });
+        })
     }
 
 
     /// Spawn health check loop - monitors OCR server health
-    fn spawn_health_check_loop(&self, _app: AppHandle) {
+    fn spawn_health_check_loop(&self, _app: AppHandle) -> tokio::task::JoinHandle<()> {
         let state = Arc::clone(&self.state);
         let stop_signal = Arc::clone(&self.stop_signal);
         let ocr_service = Arc::clone(&self.ocr_service);  // Use shared service
@@ -819,7 +846,7 @@ impl OcrTracker {
                 // Check every 2 seconds
                 sleep(Duration::from_secs(2)).await;
             }
-        });
+        })
     }
 }
 

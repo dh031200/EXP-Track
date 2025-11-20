@@ -141,6 +141,29 @@ impl OcrService {
         Ok(empty)
     }
 
+    /// Recognize specific inventory slots (Rust native implementation)
+    /// Returns HashMap with slot names as keys and item counts as values
+    pub fn recognize_specific_inventory(&self, image: &DynamicImage, slots: &[String]) -> Result<HashMap<String, u32>, String> {
+        // Try Rust native template matching first
+        if let Some(matcher) = &self.inventory_matcher {
+            match matcher.detect_inventory_region_with_coords(image) {
+                Ok((inventory_image, _coords)) => {
+                    if let Ok(results) = matcher.recognize_specific_slots(&inventory_image, slots) {
+                        return Ok(results);
+                    }
+                }
+                Err(_) => {}
+            }
+        }
+
+        // Fallback: Return empty inventory for requested slots
+        let mut empty = HashMap::new();
+        for slot in slots {
+            empty.insert(slot.to_string(), 0);
+        }
+        Ok(empty)
+    }
+
     /// Check if OCR server is healthy
     pub async fn health_check(&self) -> Result<(), String> {
         self.http_client.health_check().await
