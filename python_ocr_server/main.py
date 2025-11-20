@@ -31,15 +31,19 @@ else:
 models_dir = base_path / "rapidocr" / "models"
 
 
-# Model file paths
+# Model file paths - Using English model for better number recognition
 det_model_path = models_dir / "ch_PP-OCRv4_det_infer.onnx"
 cls_model_path = models_dir / "ch_ppocr_mobile_v2.0_cls_infer.onnx"
-rec_model_path = models_dir / "ch_PP-OCRv4_rec_infer.onnx"
+rec_model_path = models_dir / "en_PP-OCRv4_rec_infer.onnx"  # English model for numbers
+
+# Character dictionary for numbers only (0-9, [, ], %, .)
+dict_path = base_path / "dict_numbers.txt"
 
 print(f"📁 Models directory: {models_dir}")
 print(f"   Det model: {det_model_path.exists()}")
 print(f"   Cls model: {cls_model_path.exists()}")
-print(f"   Rec model: {rec_model_path.exists()}")
+print(f"   Rec model (EN): {rec_model_path.exists()}")
+print(f"   Number dict: {dict_path.exists()}")
 
 
 # OCR engine pool - one engine per worker for true parallelism
@@ -59,6 +63,12 @@ def _load_engine(idx: int) -> RapidOCR:
             "Det.model_path": str(det_model_path),
             "Rec.model_path": str(rec_model_path),
             "Cls.model_path": str(cls_model_path),
+            # Number-only character dictionary for reduced misrecognition
+            "Rec.character_dict_path": str(dict_path) if dict_path.exists() else None,
+            # Detection parameter tuning for game UI
+            "Det.det_db_thresh": 0.3,       # Binary threshold (lower = more sensitive)
+            "Det.det_db_box_thresh": 0.5,   # Box confidence (lower = more boxes detected)
+            "Det.det_db_unclip_ratio": 1.6, # Box expansion ratio (higher = larger boxes)
         }
     )
     print(f"   ✅ Engine {idx+1}/4 loaded (~24MB)")
@@ -221,7 +231,8 @@ def _run_ocr_sync(image: np.ndarray, engine_idx: int) -> tuple[List[TextBox], st
     processed_image = preprocess_image(image)
 
     # RapidOCR returns a RapidOCROutput object with txts, boxes, scores attributes
-    ocr_output = engine(processed_image, text_score=0.85)
+    # Lowered text_score for better recall on game UI numbers
+    ocr_output = engine(processed_image, text_score=0.75)
 
     # Extract structured data from RapidOCROutput
     boxes = []

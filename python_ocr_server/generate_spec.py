@@ -112,6 +112,8 @@ a = Analysis(
     datas=[
         # Include entire RapidOCR package with all resources
         ('{rapidocr_path}', 'rapidocr'),
+        # Include number-only dictionary for OCR
+        ('dict_numbers.txt', '.'),
     ],
     hiddenimports=[
         # RapidOCR core
